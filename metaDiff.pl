@@ -145,11 +145,6 @@ sub gatherElementInfo
 	#TODO: complete
 }
 
-sub _getDirSnapshot
-{
-	
-}
-
 sub initDB
 {
 	#TODO: complete
@@ -157,12 +152,20 @@ sub initDB
 
 sub newRamDB
 {
-	my $dbh = DBI->connect("dbi:SQLite:dbname=:memory:") || die;
+	my $dbh = DBI->connect(
+		"dbi:SQLite:dbname=:memory:", # DSN
+		"", # user
+		"", # password
+		{ RaiseError => 1 } # other
+	) || die;
 	
 	initDB($dbh);
 	
 	return $dbh;
 }
+
+#TODO: Prepared statements:
+# $sth = $dbh->prepare("") || die;
 
 sub getDirSnapshot
 {
