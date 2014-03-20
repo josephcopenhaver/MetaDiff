@@ -122,15 +122,7 @@ sub doF
 	my @args = @_[2..$#_];
 	eval
 	{
-		if (scalar(@args))
-		{
-			$doF->(@args);
-		}
-		else
-		{
-			undef(@args);
-			$doF->();
-		}
+		$doF->(@args);
 	};
 	if ($@)
 	{
