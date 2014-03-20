@@ -17,6 +17,20 @@ sub quoteList
     return @rval;
 }
 
+sub sql_sprintf
+{
+    my $rval = $_[0];
+    my $c = () = $rval =~ /\?/g;
+    
+    $c == $#_ || die;
+    return $rval if ($c == 0);
+    
+    $rval =~ s/%/%%/g;
+    $rval =~ s/\?/%s/g;
+    $c = sprintf($rval, @_[1..$#_]);
+    return $c;
+}
+
 
 ## CLASS STRUCT ##
 my %activeInstances = ();
@@ -31,7 +45,7 @@ sub new
         execute => sub
         {
             my $ref = $_[1];
-            printf("E_PS: %s; [ %s ]\n", $ref->{'cmd'}, join(', ', quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
+            printf("E_PS: %s\n", sql_sprintf($ref->{'cmd'}, quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
             my $sth = $ref->{'sth'};
             if (!defined($sth))
             {
