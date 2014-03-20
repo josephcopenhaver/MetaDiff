@@ -45,7 +45,7 @@ sub new
         execute => sub
         {
             my $ref = $_[1];
-            printf("E_PS: %s\n", sql_sprintf($ref->{'cmd'}, quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
+            warn sprintf("E_PS: %s\n", sql_sprintf($ref->{'cmd'}, quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
             my $sth = $ref->{'sth'};
             if (!defined($sth))
             {

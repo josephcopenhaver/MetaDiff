@@ -15,6 +15,7 @@ use Fcntl qw(:seek);
 use File::Temp qw/ tempfile /;#tempdir
 use CONST;
 use SqliteCursor;
+use CSV_IO;
 
 use constant
 {
@@ -81,7 +82,6 @@ $renameSnap1Tables = undef;
 ###
 
 
-my $MY_CSV_FD = undef;
 my $MY_CSV = undef;
 my $MY_CURSOR = undef;
 my $numArgv = scalar(@ARGV);
@@ -141,7 +141,7 @@ sub doF
 			{
 				$e = "\n$e";
 			}
-			warn("$@$e\n");
+			warn "$@$e\n";
 		}
 		if ($__eb)
 		{
@@ -496,14 +496,14 @@ sub runScript
     my $e;
     foreach $e (@$script)
     {
-        printf("E_DO: %s\n", $e) if CONST::DEBUG;
+        warn "E_DO: $e\n" if CONST::DEBUG;
         $dbh->do($e, @doArgs) || die;
     }
 }
 
 sub initDB
 {
-	print("Initializing new DB\n") if CONST::DEBUG;
+	warn "Initializing new DB\n" if CONST::DEBUG;
 	my $dbh = $_[0];
     runScript($dbh, SCRIPT_CREATE_SNAPSHOT_DB);
     runScript($dbh, SCRIPT_INIT_SNAPSHOT_DB);
@@ -536,14 +536,14 @@ sub getDirSnapshot
 		{
 			return;
 		}
-		warn("Cleaning up tmp csv file\n") if CONST::DEBUG;
+        warn "Cleaning up tmp csv file\n" if CONST::DEBUG;
 		my $t = $csvInOut;
-		warn("File: '$t'\n") if CONST::DEBUG2;
-		$csvInOutFH->close();
+		warn "File: '$t'\n" if CONST::DEBUG2;
+        $csvInOutFH->close();
 		$csvInOutFH = undef;
 		$csvInOut = undef;
 		unlink($t) || die;
-		warn("tmp csv file '$t' cleaned\n") if CONST::DEBUG;
+		warn "tmp csv file '$t' cleaned\n" if CONST::DEBUG;
 	};
 	state $doL = sub
 	{
@@ -565,6 +565,7 @@ sub getDirSnapshot
 		my $abs_src_root_path = $abs_src_path;
 		($csvInOutFH, $csvInOut) = tempfile(SUFFIX => '_jcope_mdif.csv', UNLINK => 1);
 		binmode($csvInOutFH) || die;
+        $MY_CSV = CSV_IO->new('>', undef, fh => $csvInOutFH);
 		$dbh = newRamDB();
         $MY_CURSOR = SqliteCursor->new($dbh);
 		if (getPathType($abs_src_path) != TYPE_DIR)
@@ -580,6 +581,7 @@ sub getDirSnapshot
 			}
 		}
 		seek($csvInOutFH, SEEK_SET, 0) || die;
+        $MY_CSV = CSV_IO->new('<', undef, fh => $csvInOutFH);
 		gatherElementInfo($abs_src_root_path);
 		$cleanupCsv->();
 		print('Saving data to file... ');
