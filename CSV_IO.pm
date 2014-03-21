@@ -10,14 +10,12 @@ use feature "state";
 sub unescape
 {
     my $e = $_[0];
-    die if (length($e) < 2);
-    substr($e, 0, 1) eq '"' || die;
-    substr($e, -1, 1) eq '"' || die;
+    $e =~ /^".*"$/s || die;
     $e = substr($e, 1, -1);
-    die if ($e =~ /[^"]"(?:"")*[^"]/m
-        || $e =~ /^"(?:"")*[^"]/m
-        || $e =~ /[^"]"(?:"")*$/m
-        || $e =~ /^"(?:"")*$/m);
+    die if ($e =~ /[^"]"(?:"")*[^"]/
+        || $e =~ /^"(?:"")*[^"]/
+        || $e =~ /[^"]"(?:"")*$/
+        || $e =~ /^"(?:"")*$/);
     $e =~ s/""/"/g;
     return $e;
 }
@@ -107,18 +105,18 @@ sub readrow
     }
     defined($line) || die;
     $line = join('', @lines, $line);
-    while ($line ne '')
+    while (defined($line) && $line ne '')
     {
         if ($line =~ /^"/)
         {
             # looking for close of quoted section
-            if ($line =~ /^((?:"")+)(?:,|\r\n|\r|\n)/m)
+            if ($line =~ /^((?:"")+)(?:,|\r\n|\r|\n)/ || $line =~ /^((?:"")+)$/)
             {
                 $column = $1;
                 $line = $';
                 $column = unescape($column);
             }
-            elsif ($line =~ /^(.*?[^"]"(?:"")*)(?:,|\r\n|\r|\n)/m)
+            elsif ($line =~ /^(.*?[^"]"(?:"")*)(?:,|\r\n|\r|\n)/s || $line =~ /^((?:.|[\r\n])*?[^"]"(?:"")*)$/)
             {
                 $column = $1;
                 $line = $';
@@ -132,9 +130,9 @@ sub readrow
         else
         {
             # looking for close of non-quoted section
-            if ($line =~ /(?:,|\r\n|\r|\n)/m)
+            if ($line =~ /^(.*?)(?:,|\r\n|\r|\n)/ || $line =~ /^((?:.|[\r\n])*)$/)
             {
-                $column = $`;
+                $column = $1;
                 $line = $';
             }
             else
@@ -216,7 +214,7 @@ sub writerow
         else
         {
             $fh->print(',') || die;
-            print STDERR ', ' if CONST::DEBUG;
+            print STDERR ',' if CONST::DEBUG;
         }
         $fh->print($_) || die;
         print STDERR $_ if CONST::DEBUG;
