@@ -96,8 +96,6 @@ sub readrow
     my $nc = $self->{'nc'};
     my $modDQ = 0;
     my @lines = ();
-    my $column;
-    my @columns = ();
     while (defined($line) && ($modDQ = (($modDQ + (() = $line =~ /"/g)) % 2)) != 0)
     {
         push(@lines, $line);
@@ -105,6 +103,8 @@ sub readrow
     }
     defined($line) || die;
     $line = join('', @lines, $line);
+    my $column;
+    my @columns = ();
     while (defined($line) && $line ne '')
     {
         if ($line =~ /^"/)
@@ -181,16 +181,17 @@ sub writerow
         $self->{'nc'} = $nc;
     }
     my @row = @_[1..$#_];
-    my $firstPrint = 1;
-    my $escape;
-    my $wrap;
-    if ($#row == 0 && (!defined(($escape = $row[0])) || $escape eq ''))
+    my $firstPrint;
+    if ($#row == 0 && (!defined(($firstPrint = $row[0])) || $firstPrint eq ''))
     {
         $fh->print("\"\"\n") || die;
         warn "ROW: \"\"\n:EOR\n" if CONST::DEBUG;
         return;
     }
     print STDERR 'ROW: ' if CONST::DEBUG;
+    my $escape;
+    my $wrap;
+    $firstPrint = 1;
     foreach (@row)
     {
         if (!defined($_))
