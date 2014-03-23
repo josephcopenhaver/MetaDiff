@@ -616,8 +616,56 @@ sub getDirHash
 
 sub getCommonPathPrefix
 {
-	#TODO: complete
-	return undef;
+	state $pathSep = File::Spec->catfile('', '');
+	state $pathSepQuoted = quotemeta $pathSep;
+	state $e = undef;
+	state $getPathHead = sub
+	{
+		$e = $_[0];
+		if ($e =~ /((?<!$pathSepQuoted))$pathSepQuoted/)
+		{
+			return (sprintf('%s%s', $`, $1), ($' eq '') ? undef : $');
+		}
+		return ($e, undef);
+	};
+	state $p1 = undef;
+	state $p2 = undef;
+	state $ph1 = undef;
+	state $ph2 = undef;
+	state $pt1 = undef;
+	state $pt2 = undef;
+	state $step = sub
+	{
+		($ph1, $pt1) = $getPathHead->($p1);
+		if (defined($ph1))
+		{
+			($ph2, $pt2) = $getPathHead->($p2);
+		}
+		else
+		{
+			$ph2 = undef;
+		}
+	};
+	!defined($e) || die;
+	($p1, $p2) = @_;
+	my @rval = ();
+	$step->();
+	while (defined($ph2) && $ph2 eq $ph1)
+	{
+		push(@rval, $ph2);
+		last if (!defined($pt1) || !defined($pt2));
+		$p1 = $pt1;
+		$p2 = $pt2;
+		$step->();
+	}
+	$p1 = undef;
+	$p2 = undef;
+	$ph1 = undef;
+	$ph2 = undef;
+	$pt1 = undef;
+	$pt2 = undef;
+	$e = undef;
+	return scalar(@rval) ? join($pathSep, @rval) : undef;
 }
 
 sub getInfoForElement
