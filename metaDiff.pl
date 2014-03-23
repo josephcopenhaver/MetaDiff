@@ -11,8 +11,10 @@ use File::Spec;
 use feature "state";
 use FileHandle;
 use File::Basename;
+use File::stat;
 use Fcntl qw(:seek);
 use File::Temp qw/ tempfile /;#tempdir
+use Digest::SHA;
 use CONST;
 use SqliteCursor;
 use CSV_IO;
@@ -484,9 +486,303 @@ sub recurseAddElement
 	}
 }
 
-sub gatherElementInfo
+sub getElementPath
+{
+	state $cmd_createTmpPathsTable = {'cmd' => 'CREATE TEMP TABLE IF NOT EXISTS tmp_paths(element_id integer PRIMARY KEY NOT NULL, path TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)'};
+	state $cmd_insertTmpPath = {'cmd' => 'INSERT INTO tmp_paths VALUES (?,?)'};
+	state $sqs_pathForElementID = {'sqs' => 'path;tmp_paths;where=element_id=?'};
+	state $sqs_nameForElementID = {'sqs' => 'name;path_elements JOIN path_names on path_names.name_id=path_elements.name_id;where=element_id=?'};
+	state $sqs_pidForElementID = {'sqs' => 'parent_id;element_parents;where=element_id=?'};
+	
+	defined($MY_CURSOR) || die;
+	$MY_CURSOR->execute($cmd_createTmpPathsTable);
+	
+	my ($element_id, $noCaching) = @_;
+	
+	my $path = getOneOrUndef($sqs_pathForElementID, $element_id);
+	if (!defined($path) && !$noCaching)
+	{
+		# get parent until no parent or has path in cache for element_id
+		my $target_id = $element_id;
+		my %pathsForElementIDs = ();
+		my ($name,$k,$v);
+		while (!defined($path))
+		{
+			$name = getOne($sqs_nameForElementID, $element_id);
+			while (($k, $v) = each %pathsForElementIDs)
+			{
+				$pathsForElementIDs{$k} = join_path($name, $v);
+			}
+			$pathsForElementIDs{$element_id} = $name;
+			$element_id = getOneOrUndef($sqs_pidForElementID, $element_id);
+			last if !defined($element_id);
+			$path = getOneOrUndef($sqs_pathForElementID, $element_id);
+		}
+		if (defined($path))
+		{
+			while (($k, $v) = each %pathsForElementIDs)
+			{
+				$pathsForElementIDs{$k} = join_path($path, $v);
+			}
+		}
+		while (($k, $v) = each %pathsForElementIDs)
+		{
+			$MY_CURSOR->execute($cmd_insertTmpPath, $k, $v);
+		}
+		$path = $pathsForElementIDs{$target_id};
+	}
+	defined($path) || die;
+	return $path;
+}
+
+sub getFileSize
+{
+	my $rval = -s $_[0];
+	return $rval;
+}
+
+sub getMTime
+{
+	my $rval = stat($_[0])->mtime;
+	return $rval;
+}
+
+sub getHashObj
+{
+	state $hashLength = 256;
+	
+	state $rval = new Digest::SHA->new($hashLength); # TODO: nothing that depends on this function can run in parallel
+	$rval->reset();
+	
+	return $rval;
+}
+
+sub getFileHash
+{
+	my $hashObj = getHashObj();
+	my $rval;
+	$hashObj->addfile($_[0]);
+	$rval = $hashObj->b64digest();
+	
+	return $rval;
+}
+
+sub getDirHash
+{
+	#element_parents.element_id, -- not part of query because not used
+	# only useful for debugging
+	state $sqs_elementsInDir = {'sqs' => 'name,type_id,hash,size,target;element_parents JOIN path_elements ON element_parents.element_id=path_elements.element_id JOIN path_names ON path_elements.name_id=path_names.name_id LEFT JOIN element_hash ON element_parents.element_id=element_hash.element_id LEFT JOIN element_size ON element_parents.element_id=element_size.element_id LEFT JOIN element_link ON element_parents.element_id=element_link.element_id;where=parent_id=?;order_by=element_parents.element_id asc'};
+	state $hashObj = undef;
+	state $name = undef;
+	state $type_id = undef;
+	state $hash = undef;
+	state $size = undef;
+	state $target = undef;
+	state $doForRow = sub
+	{
+		($name, $type_id, $hash, $size, $target) = @_;
+		$hashObj->add($name);
+		if ($type_id == TYPE_DIR)
+		{
+			$hashObj->add($hash);
+		}
+		elsif ($type_id == TYPE_FILE)
+		{
+			$hashObj->add($hash, $size);
+		}
+		elsif ($type_id == TYPE_SYMLINK)
+		{
+			$hashObj->add($target);
+		}
+		else
+		{
+			die;
+		}
+	};
+	#
+	!defined($hashObj) || die;
+	my $hashObj2;
+	my $rval;
+	$hashObj = getHashObj();
+	
+	doForAllRows($doForRow, $sqs_elementsInDir, @_);
+	
+	$hashObj2 = $hashObj;
+	$hashObj = undef;
+	$rval = $hashObj2->b64digest();
+	
+	return $rval;
+}
+
+sub getCommonPathPrefix
 {
 	#TODO: complete
+	return undef;
+}
+
+sub getInfoForElement
+{
+	state $newFileCmdList = [
+		{'cmd' => 'INSERT INTO element_size(element_id,size) VALUES (?,?)'},
+		{'cmd' => 'INSERT INTO element_lastmodified(element_id,last_modified) VALUES (?,?)'},
+		{'cmd' => 'INSERT INTO element_hash(element_id,hash) VALUES (?,?)'}
+	];
+	state $cmd_newSymlink = {'cmd' => 'INSERT INTO element_link(element_id,target) VALUES (?,?)'};
+	state $cmd_newDir = {'cmd' => 'INSERT INTO element_hash(element_id,hash) VALUES (?,?)'};
+	#
+	defined($MY_CURSOR) || die;
+	my ($element_id, $type_id, $abs_src_root_path, $abs_path) = @_;
+	defined($element_id) || die;
+	defined($type_id) || die;
+	defined($abs_src_root_path) == defined($abs_path) || die
+	my ($file_abs_path, $hash);
+	if ($type_id == TYPE_FILE)
+	{
+		if (defined($abs_path))
+		{
+			$file_abs_path = $abs_path;
+		}
+		else
+		{
+			$file_abs_path = getElementPath($element_id);
+			$file_abs_path = join_path($abs_src_root_path, $file_abs_path);
+		}
+		my $size = getFileSize($file_abs_path);
+		my $mtime = getMTime($file_abs_path);
+		$hash = getFileHash($file_abs_path);
+		my @args = ($size, $mtime, $hash);
+		my $cmd;
+		my $i = 0;
+		foreach $cmd (@$newFileCmdList)
+		{
+			$MY_CURSOR->execute($cmd, $element_id, $args[$i]);
+			$i++;
+		}
+	}
+	elsif ($type_id == TYPE_SYMLINK)
+	{
+		if (defined($abs_path))
+		{
+			$file_abs_path = $abs_path;
+		}
+		else
+		{
+			$file_abs_path = getElementPath($element_id);
+			$file_abs_path = join_path($abs_src_root_path, $file_abs_path);
+		}
+		$file_abs_path = abs_path($file_abs_path);
+		my $relpath = $file_abs_path;
+		if (defined($abs_src_root_path))
+		{
+			my $commonPathPrefix = getCommonPathPrefix($abs_src_root_path, $file_abs_path);
+			if (defined($commonPathPrefix) && $commonPathPrefix ne '' && $commonPathPrefix eq $abs_src_root_path)
+			{
+				$relpath = sprintf('.%s', substr($file_abs_path, length($commonPathPrefix)));
+			}
+		}
+		$MY_CURSOR->execute($cmd_newSymlink, $element_id, $relpath);
+	}
+	elsif ($type_id == TYPE_DIR)
+	{
+		$hash = getDirHash($element_id);
+		$MY_CURSOR->execute($cmd_newDir, $element_id, $hash);
+	}
+	else
+	{
+		die
+	}
+}
+
+sub gatherElementInfo
+{
+	state $fmt_progress = "%3d.%03d%%\r";
+	state $atMin = sprintf($fmt_progress, 0, 0);
+	state $atMax = sprintf(substr($fmt_progress, 0, -1) . "\n", 100, 0);
+	state $sqs_numElements = {'sqs' => 'COUNT(*);path_elements'};
+	state $sqs_numOfType = {'sqs' => 'COUNT(*);path_elements;where=type_id=?'};
+	state $sqs_elementAndType_ascID_notType = {'sqs' => 'element_id,type_id;path_elements;where=type_id<>?;order_by=element_id ASC'};
+	state $sqs_element_descID_ofType = {'sqs' => 'element_id;path_elements;where=type_id=?;order_by=element_id DESC'};
+	state $ioStatePre = undef;
+	state $old_fh = undef;
+	state $doF = sub
+	{
+		my $abs_src_root_path = $_[0];
+		my $numElements = getOne($sqs_numElements);
+		my $numDirs = getOne($sqs_numOfType, TYPE_DIR);
+		my $numNonDirs = $numElements - $numDirs;
+		
+		my $eNum = 0;
+		my $lastMsg;
+		my $newMsg;
+		my $rowRef;
+		my $element_id;
+		
+		print "Analyzing non-directories\n";
+		if ($numNonDirs > 0)
+		{
+			print $atMin;
+			$lastMsg = $atMin;
+			$eNum = 0;
+			my $type_id;
+			my $abs_path;
+			foreach $rowRef (get(1, 1, 1, $sqs_elementAndType_ascID_notType, TYPE_DIR))
+			{
+				last if !defined($rowRef);#TODO: maybe not required
+				$newMsg = sprintf($fmt_progress, $eNum*100/$numNonDirs, ($eNum*100000/$numNonDirs)%1000);
+				if ($lastMsg ne $newMsg)
+				{
+					print $newMsg;
+					$lastMsg = $newMsg;
+				}
+				$eNum++;
+				($element_id, $type_id) = @$rowRef;
+				($abs_path) = $MY_CSV->readrow();
+				defined($abs_path) || die;
+				getInfoForElement($element_id, $type_id, $abs_src_root_path, $abs_path);
+			}
+			print $atMax;
+		}
+		print "Analyzing directories\n";
+		if ($numDirs > 0)
+		{
+			print $atMin;
+			$lastMsg = $atMin;
+			$eNum = 0;
+			foreach $rowRef (get(1, 1, 1, $sqs_element_descID_ofType, TYPE_DIR))
+			{
+				last if !defined($rowRef);#TODO: maybe not required
+				$newMsg = sprintf($fmt_progress, $eNum*100/$numDirs, ($eNum*100000/$numDirs)%1000);
+				if ($lastMsg ne $newMsg)
+				{
+					print $newMsg;
+					$lastMsg = $newMsg;
+				}
+				$eNum++;
+				($element_id) = @$rowRef;
+				getInfoForElement($element_id, TYPE_DIR);
+			}
+		}
+		print $atMax;
+	};
+	state $doL = sub
+	{
+		$| = $ioStatePre;
+		$ioStatePre = undef;
+		select($old_fh);
+		$old_fh = undef;
+	};
+	# end static's
+	defined($MY_CURSOR) || die;
+	(defined($MY_CSV) && defined($MY_CSV->{'fh'}) && $MY_CSV->{'fm'} eq '<') || die;
+	
+	# not re-entrant
+	!defined($old_fh) || die;
+	!defined($ioStatePre) || die;
+	
+	$old_fh = select(STDOUT);
+	$ioStatePre = $|;
+	$| = 1;
+	return doF($doF, $doL, @_);
 }
 
 sub runScript

@@ -24,7 +24,7 @@ sub unescape
 ## CLASS STRUCT ##
 sub new
 {
-    state $anonymousNane = "<anonymous>";
+    state $anonymousName = "<anonymous>";
     warn "Creating CSV IO...\n" if CONST::DEBUG;
     my ($class, $mode, $filename) = @_;
     my %options = (@_[3..$#_]);
@@ -36,7 +36,7 @@ sub new
         if (!defined($filename))
         {
             warn "Using anonymous filename\n" if CONST::DEBUG;
-            $filename = $anonymousNane;
+            $filename = $anonymousName;
         }
     }
     else
