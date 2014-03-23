@@ -314,6 +314,10 @@ sub get
     {
         #assert no error
         die $sth->err if $sth->err;
+		if ($multipleRows && $fetchAll)
+		{
+			return @row;
+		}
         return undef;
     }
     
@@ -775,7 +779,6 @@ sub gatherElementInfo
 			my $abs_path;
 			foreach $rowRef (get(1, 1, 1, $sqs_elementAndType_ascID_notType, TYPE_DIR))
 			{
-				last if !defined($rowRef);#TODO: maybe not required
 				$newMsg = sprintf($fmt_progress, $eNum*100/$numNonDirs, ($eNum*100000/$numNonDirs)%1000);
 				if ($lastMsg ne $newMsg)
 				{
@@ -798,7 +801,6 @@ sub gatherElementInfo
 			$eNum = 0;
 			foreach $rowRef (get(1, 1, 1, $sqs_element_descID_ofType, TYPE_DIR))
 			{
-				last if !defined($rowRef);#TODO: maybe not required
 				$newMsg = sprintf($fmt_progress, $eNum*100/$numDirs, ($eNum*100000/$numDirs)%1000);
 				if ($lastMsg ne $newMsg)
 				{
