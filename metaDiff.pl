@@ -458,7 +458,7 @@ sub addElement
 	my $basename = basename($abs_path);
 	my $name_id;
 	my $ext_id = undef;
-	if ($type_id == TYPE_FILE && $basename =~ /(?<![\.])\.([^\.]+)$/)
+	if ($type_id == TYPE_FILE && $basename =~ /(?<![\.])\.([^\.]+)$/ && $` ne '')
 	{
 		$basename = $`;
 		$name_id = $1;
