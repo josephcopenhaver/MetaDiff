@@ -811,6 +811,12 @@ sub gatherElementInfo
 		my $rowRef;
 		my $element_id;
 		
+		if ($numElements <= 0)
+		{
+			print "Nothing to analyze\n";
+			return;
+		}
+		
 		print "Analyzing non-directories\n";
 		if ($numNonDirs > 0)
 		{
@@ -835,6 +841,10 @@ sub gatherElementInfo
 			}
 			print $atMax;
 		}
+		else
+		{
+			print "None found\n";
+		}
 		print "Analyzing directories\n";
 		if ($numDirs > 0)
 		{
@@ -853,8 +863,12 @@ sub gatherElementInfo
 				($element_id) = @$rowRef;
 				getInfoForElement($element_id, TYPE_DIR);
 			}
+			print $atMax;
 		}
-		print $atMax;
+		else
+		{
+			print "None found\n";
+		}
 	};
 	state $doL = sub
 	{
