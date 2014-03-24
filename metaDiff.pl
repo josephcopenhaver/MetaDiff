@@ -397,7 +397,7 @@ sub _doForRows
     
     
     my @row = get(($min <= 0), 1, 0, @_[3..$#_]);
-    if (!scalar(@row))
+    if (scalar(@row) < 2)
     {
         return;
     }
@@ -575,7 +575,7 @@ sub getDirHash
 {
 	#element_parents.element_id, -- not part of query because not used
 	# only useful for debugging
-	state $sqs_elementsInDir = {'sqs' => 'name,type_id,hash,size,target;element_parents JOIN path_elements ON element_parents.element_id=path_elements.element_id JOIN path_names ON path_elements.name_id=path_names.name_id LEFT JOIN element_hash ON element_parents.element_id=element_hash.element_id LEFT JOIN element_size ON element_parents.element_id=element_size.element_id LEFT JOIN element_link ON element_parents.element_id=element_link.element_id;where=parent_id=?;order_by=element_parents.element_id asc'};
+	state $sqs_elementsInDir = {'sqs' => 'name,type_id,hash,size,target;element_parents JOIN path_elements ON element_parents.element_id=path_elements.element_id JOIN path_names ON path_elements.name_id=path_names.name_id LEFT JOIN element_hash ON element_parents.element_id=element_hash.element_id LEFT JOIN element_size ON element_parents.element_id=element_size.element_id LEFT JOIN element_link ON element_parents.element_id=element_link.element_id;where=parent_id=?;order_by=element_parents.element_id ASC'};
 	state $hashObj = undef;
 	state $name = undef;
 	state $type_id = undef;
@@ -914,6 +914,7 @@ sub getDirSnapshot
         $MY_CSV = CSV_IO->new('>', undef, fh => $csvInOutFH);
 		$dbh = newRamDB();
         $MY_CURSOR = SqliteCursor->new($dbh);
+		print("Scanning directory structure: $rel_src_path\n");
 		if (getPathType($abs_src_path) != TYPE_DIR)
 		{
 			addElement($abs_src_path);
