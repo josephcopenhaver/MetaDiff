@@ -30,6 +30,7 @@ use constant
 {
 	SCRIPT_CREATE_PATH_NAMES_TABLE => ['CREATE TABLE path_names(name_id integer PRIMARY KEY NOT NULL, name TEXT NOT NULL UNIQUE)'],
 	SCRIPT_CREATE_SNAPSHOT_DB_BASIS => ['CREATE TABLE path_elements(element_id integer PRIMARY KEY NOT NULL, type_id integer NOT NULL REFERENCES path_types(type_id) ON DELETE CASCADE, name_id integer NOT NULL REFERENCES path_names(name_id) ON DELETE CASCADE)',
+'CREATE TABLE element_extensions(element_id integer PRIMARY KEY NOT NULL REFERENCES path_elements(element_id) ON DELETE CASCADE, name_id integer NOT NULL REFERENCES path_names(name_id) ON DELETE CASCADE)',
 'CREATE TABLE element_parents(element_id integer PRIMARY KEY NOT NULL, parent_id integer REFERENCES path_elements(element_id) ON DELETE CASCADE, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)',#NULL parent indicates root level
 'CREATE TABLE element_hash(element_id integer PRIMARY KEY NOT NULL, hash TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)',
 'CREATE TABLE element_lastmodified(element_id integer PRIMARY KEY NOT NULL, last_modified TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)',
@@ -446,33 +447,54 @@ sub doForAllRows
 
 sub addElement
 {
-    state $jitSth0 = {'sqs' => 'name_id;path_names;where=name=?'};
-    state $jitSth1 = {'cmd' => 'INSERT INTO path_names(name) VALUES (?)'};
-    state $jitSth2 = {'cmd' => 'INSERT INTO path_elements(type_id, name_id) VALUES(?,?)'};
-    state $jitSth3 = {'cmd' => 'INSERT INTO element_parents(element_id, parent_id) VALUES (?,?)'};
+    state $sqs_getIDForName = {'sqs' => 'name_id;path_names;where=name=?'};
+    state $cmd_addPathName = {'cmd' => 'INSERT INTO path_names(name) VALUES (?)'};
+    state $cmd_linkName = {'cmd' => 'INSERT INTO path_elements(type_id, name_id) VALUES(?,?)'};
+    state $cmd_linkParent = {'cmd' => 'INSERT INTO element_parents(element_id, parent_id) VALUES (?,?)'};
+	state $cmd_linkExtension = {'cmd' => 'INSERT INTO element_extensions(element_id, name_id) VALUES(?,?)'};
     my ($abs_path, $parent_id, $depth) = @_;
     $depth = $depth || 0;
+	my $type_id = getPathType($abs_path);
 	my $basename = basename($abs_path);
-	my $name_id = getOneOrUndef($jitSth0, $basename);
+	my $name_id;
+	my $ext_id = undef;
+	if ($type_id == TYPE_FILE && $basename =~ /(?<![\.])\.([^\.]+)$/)
+	{
+		$basename = $`;
+		$name_id = $1;
+		$ext_id = getOneOrUndef($sqs_getIDForName, $name_id);
+		if (!defined($ext_id))
+		{
+			$MY_CURSOR->execute($cmd_addPathName, $name_id);
+			$ext_id = $MY_CURSOR->lastrowid;
+			die 'Failed to insert a row into path_names' unless defined($ext_id);
+		}
+		die unless defined($ext_id);
+	}
+	$name_id = getOneOrUndef($sqs_getIDForName, $basename);
 	if (!defined($name_id))
     {
-		$MY_CURSOR->execute($jitSth1, $basename);
+		$MY_CURSOR->execute($cmd_addPathName, $basename);
 		$name_id = $MY_CURSOR->lastrowid;
 		die 'Failed to insert a row into path_names' unless defined($name_id);
     }
-	my $type_id = getPathType($abs_path);
-	$MY_CURSOR->execute($jitSth2, $type_id, $name_id);
-	my $eid = $MY_CURSOR->lastrowid;
-	die 'Failed to insert a row into path_elements' unless defined($eid);
+	$MY_CURSOR->execute($cmd_linkName, $type_id, $name_id);
+	my $element_id = $MY_CURSOR->lastrowid;
+	die 'Failed to insert a row into path_elements' unless defined($element_id);
+	if (defined($ext_id))
+	{
+		$MY_CURSOR->execute($cmd_linkExtension, $element_id, $ext_id);
+		die unless defined($MY_CURSOR->lastrowid);
+	}
 	if (defined($parent_id))
     {
-		$MY_CURSOR->execute($jitSth3, $eid, $parent_id);
+		$MY_CURSOR->execute($cmd_linkParent, $element_id, $parent_id);
     }
 	if ($type_id != TYPE_DIR && defined($MY_CSV))
     {
 		$MY_CSV->writerow($abs_path);
 	}
-	return ($eid, $type_id);
+	return ($element_id, $type_id);
 }
 
 sub recurseAddElement
@@ -495,13 +517,15 @@ sub getElementPath
 	state $cmd_createTmpPathsTable = {'cmd' => 'CREATE TEMP TABLE IF NOT EXISTS tmp_paths(element_id integer PRIMARY KEY NOT NULL, path TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)'};
 	state $cmd_insertTmpPath = {'cmd' => 'INSERT INTO tmp_paths VALUES (?,?)'};
 	state $sqs_pathForElementID = {'sqs' => 'path;tmp_paths;where=element_id=?'};
-	state $sqs_nameForElementID = {'sqs' => 'name;path_elements JOIN path_names on path_names.name_id=path_elements.name_id;where=element_id=?'};
+	state $sqs_nameForNonFileID = {'sqs' => 'name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id;where=element_id=?'};
+	state $sqs_nameForFileID = {'sqs' => 'path_names.name,path_names2.name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id LEFT JOIN element_extensions ON element_extensions.element_id=path_elements.element_id LEFT JOIN path_names AS path_names2 ON path_names2.name_id=element_extensions.name_id;where=element_id=?'};
 	state $sqs_pidForElementID = {'sqs' => 'parent_id;element_parents;where=element_id=?'};
 	
 	defined($MY_CURSOR) || die;
 	$MY_CURSOR->execute($cmd_createTmpPathsTable);
 	
-	my ($element_id, $noCaching) = @_;
+	my ($element_id, $type_id, $noCaching) = @_;
+	defined($type_id) || die;
 	
 	my $path = getOneOrUndef($sqs_pathForElementID, $element_id);
 	if (!defined($path) && !$noCaching)
@@ -509,10 +533,28 @@ sub getElementPath
 		# get parent until no parent or has path in cache for element_id
 		my $target_id = $element_id;
 		my %pathsForElementIDs = ();
-		my ($name,$k,$v);
+		my ($name,$ext_name,$k,$v);
 		while (!defined($path))
 		{
-			$name = getOne($sqs_nameForElementID, $element_id);
+			if ($type_id == TYPE_DIR || $type_id == TYPE_SYMLINK)
+			{
+				$name = getOne($sqs_nameForNonFileID, $element_id);
+			}
+			elsif ($type_id == TYPE_FILE)
+			{
+				($name, $ext_name) = getRow($sqs_nameForFileID, $element_id);
+				if (defined($ext_name))
+				{
+					$name = sprintf("%s.%s", $name, $ext_name);
+					$ext_name = undef;
+				}
+				$type_id = TYPE_DIR;
+			}
+			else
+			{
+				die;
+			}
+			
 			while (($k, $v) = each %pathsForElementIDs)
 			{
 				$pathsForElementIDs{$k} = join_path($name, $v);
@@ -696,7 +738,7 @@ sub getInfoForElement
 		}
 		else
 		{
-			$file_abs_path = getElementPath($element_id);
+			$file_abs_path = getElementPath($element_id, $type_id);
 			$file_abs_path = join_path($abs_src_root_path, $file_abs_path);
 		}
 		my $size = getFileSize($file_abs_path);
@@ -719,7 +761,7 @@ sub getInfoForElement
 		}
 		else
 		{
-			$file_abs_path = getElementPath($element_id);
+			$file_abs_path = getElementPath($element_id, $type_id);
 			$file_abs_path = join_path($abs_src_root_path, $file_abs_path);
 		}
 		$file_abs_path = abs_path($file_abs_path);
