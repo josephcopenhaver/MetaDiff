@@ -209,7 +209,7 @@ sub getPathType
     }
     else
     {
-        #die("unknown file type: $e");# comment out to return undef
+        die("unknown file type: $e");# comment out to return undef #TODO: define how to best handle this case and if possible to reach
     }
     
     return $rval;
@@ -328,10 +328,10 @@ sub get
             return ($sth, @row);
         }
         my @rval = (\@row);
-        my $ref;
+        my $ref;# $ref appears to be a reused pointer in the supplying module, must deference it!
         while ($ref = $sth->fetchrow_arrayref)
         {
-            push(@rval, $ref);
+            push(@rval, [@$ref]);
         }
         die $sth->err if $sth->err;
         return @rval;
