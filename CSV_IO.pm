@@ -190,7 +190,6 @@ sub writerow
     }
     print STDERR 'ROW: ' if CONST::DEBUG;
     my $escape;
-    my $wrap;
     $firstPrint = 1;
     foreach (@row)
     {
@@ -199,8 +198,7 @@ sub writerow
             $_ = $undefReplacement;
         }
         $escape = (/"/);
-        $wrap = ($escape || /[,\r\n]/);
-        if ($wrap)
+        if ($escape || /[,\r\n]/)
         {
             if ($escape)
             {
