@@ -38,6 +38,7 @@ use constant
 'CREATE TABLE element_link(element_id integer PRIMARY KEY NOT NULL, target TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)'],
 	COMPARABLE_TABLES => [
 		'path_elements',
+		'element_extensions',
 		'element_parents',
 		'element_hash',
 		'element_lastmodified',
