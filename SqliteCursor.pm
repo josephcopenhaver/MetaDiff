@@ -44,15 +44,27 @@ sub new
     my $self = {
         execute => sub
         {
-            my $ref = $_[1];
+			die unless defined($dbh);
+			my $ref = $_[1];
             warn sprintf("E_PS: %s\n", sql_sprintf($ref->{'cmd'}, quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
-            my $sth = $ref->{'sth'};
+            my $sth_ = $ref->{'sth'};
+			my $sth;
+			if (!defined($sth_))
+			{
+				$sth_ = {};
+				$ref->{'sth'} = $sth_;
+				$sth = undef;
+			}
+			else
+			{
+				$sth = $sth_->{$dbh};
+			}
             if (!defined($sth))
             {
                 my $_sth = undef;
                 $sth = \$_sth;
-                $ref->{'sth'} = $sth;
-                push(@statements, $ref);
+                $sth_->{$dbh} = $sth;
+                push(@statements, $sth_);
             }
             if (!defined($$sth))
             {
@@ -64,34 +76,25 @@ sub new
         },
         destroy => sub
         {
-			my $self = $_[0];
-            die unless defined($dbh);
-			my $refList;
-            $dbh = undef;
+			die unless defined($dbh);
+			my $dbh_old = $dbh;
+            # clear out dbh
+			$dbh = undef;
             delete $activeInstances{$_[0]};
             while (my $sth_ref = pop(@statements))
             {
-                my $sth = $sth_ref->{'sth'};
-                delete $sth_ref->{'sth'};
+                my $sth = $sth_ref->{$dbh_old};
+                delete $sth_ref->{$dbh_old};
                 if (defined(my $_sth = $$sth))
                 {
                     $_sth->finish;
                     $$sth = undef;
                 }
             }
-			$refList = $self->{"ref_list"};
-			if (defined($refList))
-			{
-				delete $self->{"ref_list"};
-				my $e;
-				foreach $e (@$refList)
-				{
-					delete $e->{$self};
-				}
-			}
         },
         lastrowid => sub
         {
+			die unless defined($dbh);
             return $dbh->sqlite_last_insert_rowid();
         }
     };
@@ -116,18 +119,6 @@ sub new
     bless $self, $class;
     $activeInstances{$self} = $self;
     return $self;
-}
-
-sub addHashRef
-{
-	my $self = $_[0];
-	my $refList = $self->{"ref_list"};
-	if (!defined($refList))
-	{
-		$refList = [];
-		$self->{"ref_list"} = $refList;
-	}
-	push(@$refList, $_[1]);
 }
 
 sub destroyAll

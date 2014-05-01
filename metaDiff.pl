@@ -225,26 +225,15 @@ sub getPathType
 
 sub compileSQS
 {
-    state $sthBySQS_ = {};
+    state $sthBySQS = {};
 	my $ref = $_[0];
-    my $sthBySQS;
-	if (!defined($sthBySQS = $sthBySQS_->{$MY_CURSOR}))
-	{
-		$sthBySQS = {};
-		$sthBySQS_->{$MY_CURSOR} = $sthBySQS;
-		$MY_CURSOR->addHashRef($sthBySQS_);
-		if ($ref->{'cmd'})
-		{
-			return $sthBySQS;
-		}
-	}
-    elsif ($ref->{'cmd'})
+    if ($ref->{'cmd'})
     {
         return;
     }
     my $sqs = $ref->{'sqs'};
     my $rval;
-    if (($rval = $sthBySQS->{$sqs}))
+    if (defined($rval = $sthBySQS->{$sqs}))
     {
         $ref->{'sth'} = $rval;
         $rval = undef;
