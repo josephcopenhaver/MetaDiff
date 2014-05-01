@@ -12,6 +12,7 @@ use feature "state";
 use FileHandle;
 use File::Basename;
 use File::stat;
+use File::Copy;
 use Fcntl qw(:seek);
 use File::Temp qw/ tempfile /;#tempdir
 use Digest::SHA;
@@ -98,6 +99,11 @@ if ($numArgv > 0)
 	{
 		$numArgv == 3 || die;
 		getDirSnapshot(@ARGV[1..$#ARGV]);
+	}
+	elsif ($_ eq 'diff')
+	{
+		$numArgv == 3 || die;
+		getDiff(@ARGV[1..$#ARGV]);
 	}
 	else
 	{
@@ -219,9 +225,20 @@ sub getPathType
 
 sub compileSQS
 {
-    state $sthBySQS = {};
-    my $ref = $_[0];
-    if ($ref->{'cmd'})
+    state $sthBySQS_ = {};
+	my $ref = $_[0];
+    my $sthBySQS;
+	if (!defined($sthBySQS = $sthBySQS_->{$MY_CURSOR}))
+	{
+		$sthBySQS = {};
+		$sthBySQS_->{$MY_CURSOR} = $sthBySQS;
+		$MY_CURSOR->addHashRef($sthBySQS_);
+		if ($ref->{'cmd'})
+		{
+			return $sthBySQS;
+		}
+	}
+    elsif ($ref->{'cmd'})
     {
         return;
     }
@@ -993,6 +1010,79 @@ sub getDirSnapshot
 		$dbh->commit() || die;
 		$dbh->sqlite_backup_to_file($out_file_path) || die;
 		print("Done\n");
+	};
+	
+	# not re-entrant
+	$callDepth == 0 || die;
+	
+	return doF($doF, $doL, @_);
+}
+
+sub getDiff
+{
+	state $callDepth = 0;
+	state $tmpFH1 = undef;
+	state $tmpFile1 = undef;
+	state $tmpFH2 = undef;
+	state $tmpFile2 = undef;
+	state $doL = sub
+	{
+		$callDepth--;
+		my ($fh1, $fpath1, $fh2, $fpath2) = ($tmpFH1, $tmpFile1, $tmpFH2, $tmpFile2);
+		$tmpFH1 = undef;
+		$tmpFile1 = undef;
+		$tmpFH2 = undef;
+		$tmpFile2 = undef;
+		doF(sub{
+			if (defined($fh1))
+			{
+				doF(sub{
+					close($fh1) || die;
+				},sub{
+					unlink($fpath1) || die;
+				});
+			}
+		},sub{
+			if (defined($fh2))
+			{
+				doF(sub{
+					close($fh2) || die;
+				},sub{
+					unlink($fpath2) || die;
+				});
+			}
+		});
+	};
+	state $doF = sub
+	{
+		state $sqs_getPathElementCount = {'sqs' => 'COUNT(*);path_elements'};
+		state $sqs_getTopPathElementCount = {'sqs' => 'COUNT(*);path_elements;where=element_id>=?'};
+		$callDepth++;
+		my ($dbPath1, $dbPath2) = @_;
+		#my $isDB1Root = ((-s $dbPath1) >= (-s $dbPath2));
+		
+		($tmpFH1, $tmpFile1) = tempfile(SUFFIX => '_jcope_mdif.1.snap', UNLINK => 1);
+		copy($dbPath1, $tmpFH1) || die;
+		($tmpFH2, $tmpFile2) = tempfile(SUFFIX => '_jcope_mdif.2.snap', UNLINK => 1);
+		copy($dbPath2, $tmpFH2) || die;
+		
+		my $dbh1 = DBI->connect(sprintf('DBI:SQLite:dbname=%s', $dbPath1), '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		$dbh1 = SqliteCursor->new($dbh1);
+		
+		$MY_CURSOR = $dbh1;
+		
+		my $count = getOne($sqs_getPathElementCount);
+		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
+		
+		my $dbh2 = DBI->connect(sprintf('DBI:SQLite:dbname=%s', $dbPath2), '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		$dbh2 = SqliteCursor->new($dbh2);
+		
+		$MY_CURSOR = $dbh2;
+		
+		$count = getOne($sqs_getPathElementCount);
+		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
+		
+		print "TODO: FINISH!\n";
 	};
 	
 	# not re-entrant

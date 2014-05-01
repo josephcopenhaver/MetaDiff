@@ -64,7 +64,9 @@ sub new
         },
         destroy => sub
         {
+			my $self = $_[0];
             die unless defined($dbh);
+			my $refList;
             $dbh = undef;
             delete $activeInstances{$_[0]};
             while (my $sth_ref = pop(@statements))
@@ -77,6 +79,16 @@ sub new
                     $$sth = undef;
                 }
             }
+			$refList = $self->{"ref_list"};
+			if (defined($refList))
+			{
+				delete $self->{"ref_list"};
+				my $e;
+				foreach $e (@$refList)
+				{
+					delete $e->{$self};
+				}
+			}
         },
         lastrowid => sub
         {
@@ -104,6 +116,18 @@ sub new
     bless $self, $class;
     $activeInstances{$self} = $self;
     return $self;
+}
+
+sub addHashRef
+{
+	my $self = $_[0];
+	my $refList = $self->{"ref_list"};
+	if (!defined($refList))
+	{
+		$refList = [];
+		$self->{"ref_list"} = $refList;
+	}
+	push(@$refList, $_[1]);
 }
 
 sub destroyAll
