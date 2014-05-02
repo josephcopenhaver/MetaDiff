@@ -1094,7 +1094,7 @@ sub getDiff
 				print "1: " . $path1 . "\n";
 				$MY_CURSOR = $dbh2;
 				$path2 = getElementPath(@row2[0..1]);
-				print "2: " . $path1 . "\n";
+				print "2: " . $path2 . "\n";
 				# TODO: diff the elements
 				# TODO: update $getNewRow1
 				# TODO: update $getNewRow2
