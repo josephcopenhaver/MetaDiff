@@ -1046,6 +1046,8 @@ sub getDiff
 	{
 		state $sqs_getPathElementCount = {'sqs' => 'COUNT(*);path_elements'};
 		state $sqs_getTopPathElementCount = {'sqs' => 'COUNT(*);path_elements;where=element_id>=?'};
+		state $sqs_getMatchPathElementCount = {'sqs' => 'COUNT(*);path_elements;where=element_id=?'};
+		state $sqs_getAllElements = {'sqs' => 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC'};
 		$callDepth++;
 		my ($dbPath1, $dbPath2) = @_;
 		#my $isDB1Root = ((-s $dbPath1) >= (-s $dbPath2));
@@ -1062,6 +1064,7 @@ sub getDiff
 		
 		my $count = getOne($sqs_getPathElementCount);
 		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
+		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
 		
 		my $dbh2 = DBI->connect(sprintf('DBI:SQLite:dbname=%s', $dbPath2), '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
 		$dbh2 = SqliteCursor->new($dbh2);
@@ -1070,6 +1073,64 @@ sub getDiff
 		
 		$count = getOne($sqs_getPathElementCount);
 		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
+		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
+		
+		my @row2 = get(1, 1, 0, $sqs_getAllElements);
+		$MY_CURSOR = $dbh1;
+		my @row1 = get(1, 1, 0, $sqs_getAllElements);
+		
+		
+		my $sth1 = undef;
+		my $sth2 = undef;
+		if (defined($row1[0]))
+		{
+			$sth1 = shift(@row1);
+		}
+		if (defined($row2[0]))
+		{
+			$sth2 = shift(@row2);
+		}
+		
+		
+		my $getNewRow1 = 1;
+		my $getNewRow2 = 1;
+		while (scalar(@row1) && scalar(@row2))
+		{
+		
+			# TODO: diff the elements
+			# TODO: update $getNewRow1
+			# TODO: update $getNewRow2
+			
+			if ($getNewRow1)
+			{
+				@row1 = $sth1->fetchrow_array();
+			}
+			if ($getNewRow2)
+			{
+				@row2 = $sth2->fetchrow_array();
+			}
+		}
+		
+		
+		if (scalar(@row1))
+		{
+			# tail end of row1
+			do
+			{
+				# TODO: finish
+				@row1 = $sth1->fetchrow_array();
+			} while (scalar(@row1));
+		}
+		elsif (scalar(@row2))
+		{
+			# tail end of row2
+			do
+			{
+				# TODO: finish
+				@row2 = $sth2->fetchrow_array();
+			} while (scalar(@row2));
+		}
+		
 		
 		print "TODO: FINISH!\n";
 	};
