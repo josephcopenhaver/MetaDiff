@@ -36,16 +36,7 @@ use constant
 'CREATE TABLE element_hash(element_id integer PRIMARY KEY NOT NULL, hash TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)',
 'CREATE TABLE element_lastmodified(element_id integer PRIMARY KEY NOT NULL, last_modified TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)',
 'CREATE TABLE element_size(element_id integer PRIMARY KEY NOT NULL, size integer CHECK(size>=0), FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)',
-'CREATE TABLE element_link(element_id integer PRIMARY KEY NOT NULL, target TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)'],
-	COMPARABLE_TABLES => [
-		'path_elements',
-		'element_extensions',
-		'element_parents',
-		'element_hash',
-		'element_lastmodified',
-		'element_size',
-		'element_link'
-	]
+'CREATE TABLE element_link(element_id integer PRIMARY KEY NOT NULL, target TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)']
 };
 
 use constant
@@ -58,30 +49,6 @@ use constant
 	SCRIPT_CREATE_SNAPSHOT_DB => [@{+SCRIPT_CREATE_META_INFO_TABLE}, @{+SCRIPT_CREATE_SNAPSHOT_DB_BASIS}],
 	SCRIPT_INIT_SNAPSHOT_DB => [sprintf('INSERT INTO path_types SELECT %d AS type_id, \'directory\' AS type_description UNION SELECT %d,\'file\' UNION SELECT %d,\'symlink\'', TYPE_DIR, TYPE_FILE, TYPE_SYMLINK)]
 };
-
-my $createSnap2Tables = [];
-my $renameSnap1Tables = [];
-
-foreach my $line (@{+SCRIPT_CREATE_SNAPSHOT_DB_BASIS})
-{
-	foreach (@{+COMPARABLE_TABLES})
-	{
-		$line =~ s/(\Q$_\E)/$1.'2'/e;
-	}
-	push(@$createSnap2Tables, $line);
-}
-foreach (@{+COMPARABLE_TABLES})
-{
-	push(@$renameSnap1Tables, sprintf('ALTER TABLE %s RENAME TO %s2', $_, $_));
-}
-
-use constant
-{
-	SCRIPT_CREATE_SNAPSHOT_2_TABLES => $createSnap2Tables,
-	SCRIPT_RENAME_SNAPSHOT_1_TABLES => $renameSnap1Tables
-};
-$createSnap2Tables = undef;
-$renameSnap1Tables = undef;
 
 
 ###
@@ -157,6 +124,13 @@ sub doF
 		{
 			$__eb = "\n$__eb";
 		}
+		my @traceStep;
+		my $i = 1;
+		while (scalar(@traceStep = caller($i)))
+		{
+			warn sprintf("%s:%s in function %s\n", @traceStep[1..$#traceStep]);
+			$i++;
+		}
 		die "$__em$__eb"; # let root error trickle up
 	}
 	return $doL->();
@@ -209,11 +183,11 @@ sub getPathType
     }
     elsif (-d $e)
     {
-        $rval = TYPE_DIR
+        $rval = TYPE_DIR;
     }
     elsif (-f $e)
     {
-        $rval = TYPE_FILE
+        $rval = TYPE_FILE;
     }
     else
     {
@@ -525,7 +499,7 @@ sub getElementPath
 	state $cmd_insertTmpPath = {'cmd' => 'INSERT INTO tmp_paths VALUES (?,?)'};
 	state $sqs_pathForElementID = {'sqs' => 'path;tmp_paths;where=element_id=?'};
 	state $sqs_nameForNonFileID = {'sqs' => 'name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id;where=element_id=?'};
-	state $sqs_nameForFileID = {'sqs' => 'path_names.name,path_names2.name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id LEFT JOIN element_extensions ON element_extensions.element_id=path_elements.element_id LEFT JOIN path_names AS path_names2 ON path_names2.name_id=element_extensions.name_id;where=element_id=?'};
+	state $sqs_nameForFileID = {'sqs' => 'path_names.name,path_names2.name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id LEFT JOIN element_extensions ON element_extensions.element_id=path_elements.element_id LEFT JOIN path_names AS path_names2 ON path_names2.name_id=element_extensions.name_id;where=path_elements.element_id=?'};
 	state $sqs_pidForElementID = {'sqs' => 'parent_id;element_parents;where=element_id=?'};
 	
 	defined($MY_CURSOR) || die;
@@ -1050,14 +1024,16 @@ sub getDiff
 		state $sqs_getAllElements = {'sqs' => 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC'};
 		$callDepth++;
 		my ($dbPath1, $dbPath2) = @_;
-		#my $isDB1Root = ((-s $dbPath1) >= (-s $dbPath2));
 		
 		($tmpFH1, $tmpFile1) = tempfile(SUFFIX => '_jcope_mdif.1.snap', UNLINK => 1);
 		copy($dbPath1, $tmpFH1) || die;
 		($tmpFH2, $tmpFile2) = tempfile(SUFFIX => '_jcope_mdif.2.snap', UNLINK => 1);
 		copy($dbPath2, $tmpFH2) || die;
 		
-		my $dbh1 = DBI->connect(sprintf('DBI:SQLite:dbname=%s', $dbPath1), '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		my $dbh1 = sprintf('DBI:SQLite:dbname=%s', $dbPath1);
+		my $dbh1ReadOnly = DBI->connect($dbh1, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		$dbh1ReadOnly = SqliteCursor->new($dbh1ReadOnly);
+		$dbh1 = DBI->connect($dbh1, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
 		$dbh1 = SqliteCursor->new($dbh1);
 		
 		$MY_CURSOR = $dbh1;
@@ -1065,8 +1041,15 @@ sub getDiff
 		my $count = getOne($sqs_getPathElementCount);
 		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
 		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
+		$MY_CURSOR = $dbh1ReadOnly;
+		getOne($sqs_getPathElementCount) == $count || die;
+		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
+		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
 		
-		my $dbh2 = DBI->connect(sprintf('DBI:SQLite:dbname=%s', $dbPath2), '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		my $dbh2 = sprintf('DBI:SQLite:dbname=%s', $dbPath2);
+		my $dbh2ReadOnly = DBI->connect($dbh2, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		$dbh2ReadOnly = SqliteCursor->new($dbh2ReadOnly);
+		$dbh2 = DBI->connect($dbh2, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
 		$dbh2 = SqliteCursor->new($dbh2);
 		
 		$MY_CURSOR = $dbh2;
@@ -1074,9 +1057,13 @@ sub getDiff
 		$count = getOne($sqs_getPathElementCount);
 		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
 		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
+		$MY_CURSOR = $dbh2ReadOnly;
+		getOne($sqs_getPathElementCount) == $count || die;
+		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
+		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
 		
 		my @row2 = get(1, 1, 0, $sqs_getAllElements);
-		$MY_CURSOR = $dbh1;
+		$MY_CURSOR = $dbh1ReadOnly;
 		my @row1 = get(1, 1, 0, $sqs_getAllElements);
 		
 		
@@ -1092,23 +1079,37 @@ sub getDiff
 		}
 		
 		
+		$MY_CURSOR = undef;# may only be set to dbh1 or dbh2 from here on out
 		my $getNewRow1 = 1;
 		my $getNewRow2 = 1;
-		while (scalar(@row1) && scalar(@row2))
+		my $path1;
+		my $path2;
+		if (scalar(@row1) && scalar(@row2))
 		{
-		
-			# TODO: diff the elements
-			# TODO: update $getNewRow1
-			# TODO: update $getNewRow2
-			
-			if ($getNewRow1)
+			my $done = 0;
+			do
 			{
-				@row1 = $sth1->fetchrow_array();
-			}
-			if ($getNewRow2)
-			{
-				@row2 = $sth2->fetchrow_array();
-			}
+				$MY_CURSOR = $dbh1;
+				$path1 = getElementPath(@row1[0..1]);
+				print "1: " . $path1 . "\n";
+				$MY_CURSOR = $dbh2;
+				$path2 = getElementPath(@row2[0..1]);
+				print "2: " . $path1 . "\n";
+				# TODO: diff the elements
+				# TODO: update $getNewRow1
+				# TODO: update $getNewRow2
+				
+				if ($getNewRow1)
+				{
+					@row1 = $sth1->fetchrow_array();
+					$done = (scalar(@row1) == 0);
+				}
+				if ($getNewRow2)
+				{
+					@row2 = $sth2->fetchrow_array();
+					$done = $done || (scalar(@row2) == 0);
+				}
+			} while (!$done);
 		}
 		
 		
