@@ -641,58 +641,40 @@ sub getDirHash
 	return $rval;
 }
 
+sub getCommonPathLength
+{
+	state $ps = File::Spec->catfile('', '');
+	my ($p1, $p2) = @_;
+	
+	my ($l, $ub) = (length($p1), length($p2));
+	if (($l == $ub) && ($p1 eq $p2))
+	{
+		return $l;
+	}
+	
+	if ($l < $ub)
+	{
+		$ub = $l;
+	}
+	
+	my ($si, $i, $s) = (0, 0, undef);
+	while (($i < $ub) && (($s = substr($p1, $i, 1)) eq substr($p2, $i, 1)))
+	{
+		if ($s eq $ps)
+		{
+			$si = $i;
+		}
+		$i++;
+	}
+	
+	return $si;
+}
+
 sub getCommonPathPrefix
 {
-	state $pathSep = File::Spec->catfile('', '');
-	state $pathSepQuoted = quotemeta $pathSep;
-	state $e = undef;
-	state $getPathHead = sub
-	{
-		$e = $_[0];
-		if ($e =~ /((?<!$pathSepQuoted))$pathSepQuoted/)
-		{
-			return (sprintf('%s%s', $`, $1), ($' eq '') ? undef : $');
-		}
-		return ($e, undef);
-	};
-	state $p1 = undef;
-	state $p2 = undef;
-	state $ph1 = undef;
-	state $ph2 = undef;
-	state $pt1 = undef;
-	state $pt2 = undef;
-	state $step = sub
-	{
-		($ph1, $pt1) = $getPathHead->($p1);
-		if (defined($ph1))
-		{
-			($ph2, $pt2) = $getPathHead->($p2);
-		}
-		else
-		{
-			$ph2 = undef;
-		}
-	};
-	!defined($e) || die;
-	($p1, $p2) = @_;
-	my @rval = ();
-	$step->();
-	while (defined($ph2) && $ph2 eq $ph1)
-	{
-		push(@rval, $ph2);
-		last if (!defined($pt1) || !defined($pt2));
-		$p1 = $pt1;
-		$p2 = $pt2;
-		$step->();
-	}
-	$p1 = undef;
-	$p2 = undef;
-	$ph1 = undef;
-	$ph2 = undef;
-	$pt1 = undef;
-	$pt2 = undef;
-	$e = undef;
-	return scalar(@rval) ? join($pathSep, @rval) : undef;
+	my $r = getCommonPathLength(@_);
+	$r = $r ? substr($_[0], 0, $r) : undef;
+	return $r;
 }
 
 sub getInfoForElement
