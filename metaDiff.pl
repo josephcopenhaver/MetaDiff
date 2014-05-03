@@ -1174,8 +1174,18 @@ sub getDiff
 				}
 				else
 				{
-					$cmp = strcmp_b($path1, $path2, $cpl+1, (($l1 <= $l2) ? $l1 : $l2));
-					$cmp != 0 || die;
+					$cmp = strcmp_b($path1, $path2, (($cpl == 0) ? 0 : ($cpl+1)), (($l1 <= $l2) ? $l1 : $l2));
+					if ($cmp == 0)
+					{
+						if ($l1 == $l2)
+						{
+							die;
+						}
+						else
+						{
+							$cmp = ($l1 < $l2) ? (-1) : 1;
+						}
+					}
 					if ($cmp < 0)
 					{
 						printChange("DEL", $path1);
@@ -1191,13 +1201,11 @@ sub getDiff
 				
 				if (!defined($path1))
 				{
-					$path1 = undef;
 					@row1 = $sth1->fetchrow_array();
 					$done = (scalar(@row1) == 0);
 				}
 				if (!defined($path2))
 				{
-					$path2 = undef;
 					@row2 = $sth2->fetchrow_array();
 					$done = $done || (scalar(@row2) == 0);
 				}
