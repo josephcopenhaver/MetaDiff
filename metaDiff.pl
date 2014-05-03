@@ -19,6 +19,8 @@ use Digest::SHA;
 use CONST;
 use SqliteCursor;
 use CSV_IO;
+use bytes;
+use Scalar::Util qw(looks_like_number);
 
 use constant
 {
@@ -644,9 +646,12 @@ sub getDirHash
 sub getCommonPathLength
 {
 	state $ps = File::Spec->catfile('', '');
-	my ($p1, $p2) = @_;
+	my ($p1, $p2, $l, $ub) = @_;
 	
-	my ($l, $ub) = (length($p1), length($p2));
+	if ((!defined($l)) || (!defined($ub)))
+	{
+		($l, $ub) = (length($p1), length($p2));
+	}
 	if (($l == $ub) && ($p1 eq $p2))
 	{
 		return $l;
@@ -963,6 +968,25 @@ sub getDirSnapshot
 	return doF($doF, $doL, @_);
 }
 
+sub strcmp_b
+{
+	my ($a, $b, $i, $t) = @_;
+	my $r;
+	
+	do
+	{
+		$r = (substr($a, $i, 1) <=> substr($b, $i, 1));
+		$i++;
+	} while($i < $t && $r == 0);
+	
+	return $r;
+}
+
+sub printChange
+{
+	printf("%s: %s\n", @_);
+}
+
 sub getDiff
 {
 	state $callDepth = 0;
@@ -1061,36 +1085,124 @@ sub getDiff
 		}
 		
 		
+		print "BEGIN DIFF\n";
+		
+		
 		$MY_CURSOR = undef;# may only be set to dbh1 or dbh2 from here on out
-		my $getNewRow1 = 1;
-		my $getNewRow2 = 1;
-		my $path1;
-		my $path2;
 		if (scalar(@row1) && scalar(@row2))
 		{
+			my $path1 = undef;
+			my $path2 = undef;
+			my $l1;
+			my $l2;
 			my $done = 0;
+			my $cpl;
+			my $cmp;
+			my $same;
+			my $i;
+			my $i1;
+			my $i2;
+			my $ub = scalar(@row1);
 			do
 			{
-				$MY_CURSOR = $dbh1;
-				$path1 = getElementPath(@row1[0..1]);
-				print "1: " . $path1 . "\n";
-				$MY_CURSOR = $dbh2;
-				$path2 = getElementPath(@row2[0..1]);
-				print "2: " . $path2 . "\n";
-				# TODO: diff the elements
-				# TODO: update $getNewRow1
-				# TODO: update $getNewRow2
-				
-				if ($getNewRow1)
+				if (!defined($path1))
 				{
+					$MY_CURSOR = $dbh1;
+					$path1 = getElementPath(@row1[0..1]);
+					$l1 = length($path1);
+					#print "1: " . $path1 . "\n";
+				}
+				if (!defined($path2))
+				{
+					$MY_CURSOR = $dbh2;
+					$path2 = getElementPath(@row2[0..1]);
+					$l2 = length($path2);
+					#print "2: " . $path2 . "\n";
+				}
+				
+				
+				$cpl = getCommonPathLength($path1, $path2, $l1, $l2);
+				
+				
+				if (($l1 == $l2) && ($cpl == $l1))
+				{
+					# same element name
+					if ($row1[1] == $row2[1])
+					{
+						# types same, could be match or mod
+						$same = 1;
+						for ($i=2;$i<$ub;$i++)
+						{
+							$i1 = $row1[$i];
+							$i2 = $row2[$i];
+							if ((defined($i1) != defined($i2))
+								|| (defined($i1)
+									&& defined($i2)
+									#&& (($i1 <=> $i2) != 0))
+									#&& ($i1 ne $i2))
+									&& (looks_like_number($i1) ? (($i1 <=> $i2) != 0) : ($i1 ne $i2)))
+								)
+							{
+								$same = 0;
+								last;
+							}
+						}
+						if (!$same)
+						{
+							printChange("MOD", $path1);
+						}
+					}
+					else
+					{
+						printChange("DEL", $path1);
+						printChange("ADD", $path2);
+					}
+					$path1 = undef;
+					$path2 = undef;
+				}
+				elsif ($cpl == $l1)
+				{
+					# path2 is an entry in directory named $path1
+					# should not be reachable
+					die;
+				}
+				elsif ($cpl == $l2)
+				{
+					# path1 is an entry in a directory named $path2
+					# should not be reachable
+					die;
+				}
+				else
+				{
+					$cmp = strcmp_b($path1, $path2, $cpl+1, (($l1 <= $l2) ? $l1 : $l2));
+					$cmp != 0 || die;
+					if ($cmp < 0)
+					{
+						printChange("DEL", $path1);
+						$path1 = undef;
+					}
+					else
+					{
+						printChange("ADD", $path2);
+						$path2 = undef;
+					}
+				}
+				
+				
+				if (!defined($path1))
+				{
+					$path1 = undef;
 					@row1 = $sth1->fetchrow_array();
 					$done = (scalar(@row1) == 0);
 				}
-				if ($getNewRow2)
+				if (!defined($path2))
 				{
+					$path2 = undef;
 					@row2 = $sth2->fetchrow_array();
 					$done = $done || (scalar(@row2) == 0);
 				}
+				
+				
 			} while (!$done);
 		}
 		
@@ -1098,24 +1210,28 @@ sub getDiff
 		if (scalar(@row1))
 		{
 			# tail end of row1
+			$MY_CURSOR = $dbh1;
 			do
 			{
-				# TODO: finish
+				printChange("DEL", getElementPath(@row1[0..1]));
 				@row1 = $sth1->fetchrow_array();
 			} while (scalar(@row1));
 		}
 		elsif (scalar(@row2))
 		{
 			# tail end of row2
+			$MY_CURSOR = $dbh2;
 			do
 			{
-				# TODO: finish
+				printChange("ADD", getElementPath(@row2[0..1]));
 				@row2 = $sth2->fetchrow_array();
 			} while (scalar(@row2));
 		}
 		
 		
-		print "TODO: FINISH!\n";
+		print "END DIFF\n";
+		
+		
 	};
 	
 	# not re-entrant

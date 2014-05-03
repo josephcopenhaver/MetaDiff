@@ -4,6 +4,7 @@ use strict;
 use FileHandle;
 use CONST;
 use feature "state";
+use bytes;
 
 
 ## HELPERS ##
