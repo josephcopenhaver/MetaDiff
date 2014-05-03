@@ -657,7 +657,7 @@ sub getCommonPathLength
 		$ub = $l;
 	}
 	
-	my ($si, $i, $s) = (0, 0, undef);
+	my ($si, $i, $s) = (0, 0);
 	while (($i < $ub) && (($s = substr($p1, $i, 1)) eq substr($p2, $i, 1)))
 	{
 		if ($s eq $ps)
