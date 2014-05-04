@@ -72,7 +72,7 @@ if ($numArgv > 0)
 	elsif ($_ eq 'diff')
 	{
 		$numArgv == 3 || die;
-		getDiff(@ARGV[1..$#ARGV]);
+		getSnapshotDiff(@ARGV[1..$#ARGV]);
 	}
 	else
 	{
@@ -987,7 +987,7 @@ sub printChange
 	printf("%s: %s\n", @_);
 }
 
-sub getDiff
+sub getSnapshotDiff
 {
 	state $callDepth = 0;
 	state $tmpFH1 = undef;
