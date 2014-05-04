@@ -1093,6 +1093,7 @@ sub getDiff
 		{
 			my $path1 = undef;
 			my $path2 = undef;
+			my $row1Type;
 			my $l1;
 			my $l2;
 			my $done = 0;
@@ -1127,26 +1128,35 @@ sub getDiff
 				if (($l1 == $l2) && ($cpl == $l1))
 				{
 					# same element name
-					if ($row1[1] == $row2[1])
+					if (($row1Type = $row1[1]) == $row2[1])
 					{
 						# types same, could be match or mod
-						$same = 1;
-						for ($i=2;$i<$ub;$i++)
-						{
-							$i1 = $row1[$i];
-							$i2 = $row2[$i];
-							if ((defined($i1) != defined($i2))
-								|| (defined($i1)
-									&& defined($i2)
-									#&& (($i1 <=> $i2) != 0))
-									#&& ($i1 ne $i2))
-									&& (looks_like_number($i1) ? (($i1 <=> $i2) != 0) : ($i1 ne $i2)))
-								)
+						do
+						{{
+							$same = 1;
+							if ($row1Type == TYPE_DIR)
 							{
-								$same = 0;
+								# Not doing top level search for differences.
+								# Going deep, so do not compare meta info by dir
 								last;
 							}
-						}
+							for ($i=2;$i<$ub;$i++)
+							{
+								$i1 = $row1[$i];
+								$i2 = $row2[$i];
+								if ((defined($i1) != defined($i2))
+									|| (defined($i1)
+										&& defined($i2)
+										#&& (($i1 <=> $i2) != 0))
+										#&& ($i1 ne $i2))
+										&& (looks_like_number($i1) ? (($i1 <=> $i2) != 0) : ($i1 ne $i2)))
+									)
+								{
+									$same = 0;
+									last;
+								}
+							}
+						}} while (0);
 						if (!$same)
 						{
 							printChange("MOD", $path1);
