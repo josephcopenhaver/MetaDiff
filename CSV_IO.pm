@@ -113,11 +113,12 @@ sub readrow
             # looking for close of quoted section
             if ($line =~ /^((?:"")+)(?:,|\r\n|\r|\n)/ || $line =~ /^((?:"")+)$/)
             {
+				# column segment is full of double quotes
                 $column = $1;
                 $line = $';
                 $column = unescape($column);
             }
-            elsif ($line =~ /^(.*?[^"]"(?:"")*)(?:,|\r\n|\r|\n)/s || $line =~ /^((?:.|[\r\n])*?[^"]"(?:"")*)$/)
+            elsif ($line =~ /^("(?:[^"]|[\r\n]|"")*")(?:,|\r\n|\r|\n)/ || $line =~ /^("(?:[^"]|[\r\n]|"")*")$/)
             {
                 $column = $1;
                 $line = $';
@@ -131,7 +132,7 @@ sub readrow
         else
         {
             # looking for close of non-quoted section
-            if ($line =~ /^(.*?)(?:,|\r\n|\r|\n)/ || $line =~ /^((?:.|[\r\n])*)$/)
+            if ($line =~ /^([^"]*?)(?:,|\r\n|\r|\n)/ || $line =~ /^((?:[^"]|[\r\n])*)$/)
             {
                 $column = $1;
                 $line = $';
