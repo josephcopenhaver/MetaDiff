@@ -153,8 +153,7 @@ sub readrow
     }
     else
     {
-        $_nc || die;
-        $self->{'nc'} = $_nc;
+        $self->{'nc'} = $_nc || die;
     }
     
     if ($_nc <= 0)
