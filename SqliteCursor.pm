@@ -46,13 +46,13 @@ sub new
         {
 			die unless defined($dbh);
 			my $ref = $_[1];
-            warn sprintf("E_PS: %s\n", sql_sprintf($ref->{'cmd'}, quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
-            my $sth_ = $ref->{'sth'};
+            warn sprintf("E_PS: %s\n", sql_sprintf($ref->[CONST::IDX_CMD], quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
+            my $sth_ = $ref->[CONST::IDX_STH];
 			my $sth;
 			if (!defined($sth_))
 			{
 				$sth_ = {};
-				$ref->{'sth'} = $sth_;
+				$ref->[CONST::IDX_STH] = $sth_;
 				$sth = undef;
 			}
 			else
@@ -68,7 +68,7 @@ sub new
             }
             if (!defined($$sth))
             {
-                $$sth = $dbh->prepare($ref->{'cmd'}) || die
+                $$sth = $dbh->prepare($ref->[CONST::IDX_CMD]) || die
             }
             my $_sth = $$sth;
             $_sth->execute(@_[2..$#_]) || die;

@@ -29,6 +29,22 @@ use constant
 	TYPE_SYMLINK => (1 << 2)
 };
 
+sub newSqlCmd
+{
+	my ($idx, $val) = @_;
+	
+	if (CONST::IDX_SQS == $idx)
+	{
+		return [undef, undef, $val];
+	}
+	if (CONST::IDX_CMD == $idx)
+	{
+		return [undef, $val];
+	}
+	
+	die;
+};
+
 use constant
 {
 	SCRIPT_CREATE_PATH_NAMES_TABLE => ['CREATE TABLE path_names(name_id integer PRIMARY KEY NOT NULL, name TEXT NOT NULL UNIQUE)'],
@@ -203,15 +219,15 @@ sub compileSQS
 {
     state $sthBySQS = {};
 	my $ref = $_[0];
-    if ($ref->{'cmd'})
+    if ($ref->[CONST::IDX_CMD])
     {
         return;
     }
-    my $sqs = $ref->{'sqs'};
+    my $sqs = $ref->[CONST::IDX_SQS];
     my $rval;
     if (defined($rval = $sthBySQS->{$sqs}))
     {
-        $ref->{'sth'} = $rval;
+        $ref->[CONST::IDX_STH] = $rval;
         $rval = undef;
     }
     else
@@ -277,7 +293,7 @@ sub compileSQS
     defined($fields) || die;
     defined($tables) || die;
     my $cmd = sprintf('SELECT %s FROM %s%s%s%s%s', $fields, $tables, (defined($where)) ? ' WHERE ' : '', (defined($where)) ? $where : '', (defined($orderBy)) ? ' ORDER BY ' : '', (defined($orderBy)) ? $orderBy : '');
-    $ref->{'cmd'} = $cmd;
+    $ref->[CONST::IDX_CMD] = $cmd;
     return $rval;
 }
 
@@ -288,7 +304,7 @@ sub get
     my $sth = $MY_CURSOR->execute(@_[3..$#_]);
     if (defined($sthBySQS))
     {
-        $sthBySQS->{$spec->{'sqs'}} = $spec->{'sth'};
+        $sthBySQS->{$spec->[CONST::IDX_SQS]} = $spec->[CONST::IDX_STH];
     }
     my @row = $sth->fetchrow_array();
     my $numColumns = scalar(@row);
@@ -430,11 +446,11 @@ sub doForAllRows
 
 sub addElement
 {
-    state $sqs_getIDForName = {'sqs' => 'name_id;path_names;where=name=?'};
-    state $cmd_addPathName = {'cmd' => 'INSERT INTO path_names(name) VALUES (?)'};
-    state $cmd_linkName = {'cmd' => 'INSERT INTO path_elements(type_id, name_id) VALUES(?,?)'};
-    state $cmd_linkParent = {'cmd' => 'INSERT INTO element_parents(element_id, parent_id) VALUES (?,?)'};
-	state $cmd_linkExtension = {'cmd' => 'INSERT INTO element_extensions(element_id, name_id) VALUES(?,?)'};
+    state $sqs_getIDForName = newSqlCmd(CONST::IDX_SQS, 'name_id;path_names;where=name=?');
+    state $cmd_addPathName = newSqlCmd(CONST::IDX_CMD, 'INSERT INTO path_names(name) VALUES (?)');
+    state $cmd_linkName = newSqlCmd(CONST::IDX_CMD, 'INSERT INTO path_elements(type_id, name_id) VALUES(?,?)');
+    state $cmd_linkParent = newSqlCmd(CONST::IDX_CMD, 'INSERT INTO element_parents(element_id, parent_id) VALUES (?,?)');
+	state $cmd_linkExtension = newSqlCmd(CONST::IDX_CMD, 'INSERT INTO element_extensions(element_id, name_id) VALUES(?,?)');
     my ($abs_path, $parent_id, $depth) = @_;
     $depth = $depth || 0;
 	my $type_id = getPathType($abs_path);
@@ -497,12 +513,12 @@ sub recurseAddElement
 
 sub getElementPath
 {
-	state $cmd_createTmpPathsTable = {'cmd' => 'CREATE TEMP TABLE IF NOT EXISTS tmp_paths(element_id integer PRIMARY KEY NOT NULL, path TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)'};
-	state $cmd_insertTmpPath = {'cmd' => 'INSERT INTO tmp_paths VALUES (?,?)'};
-	state $sqs_pathForElementID = {'sqs' => 'path;tmp_paths;where=element_id=?'};
-	state $sqs_nameForNonFileID = {'sqs' => 'name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id;where=element_id=?'};
-	state $sqs_nameForFileID = {'sqs' => 'path_names.name,path_names2.name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id LEFT JOIN element_extensions ON element_extensions.element_id=path_elements.element_id LEFT JOIN path_names AS path_names2 ON path_names2.name_id=element_extensions.name_id;where=path_elements.element_id=?'};
-	state $sqs_pidForElementID = {'sqs' => 'parent_id;element_parents;where=element_id=?'};
+	state $cmd_createTmpPathsTable = newSqlCmd(CONST::IDX_CMD, 'CREATE TEMP TABLE IF NOT EXISTS tmp_paths(element_id integer PRIMARY KEY NOT NULL, path TEXT NOT NULL, FOREIGN KEY(element_id) REFERENCES path_elements(element_id) ON DELETE CASCADE)');
+	state $cmd_insertTmpPath = newSqlCmd(CONST::IDX_CMD, 'INSERT INTO tmp_paths VALUES (?,?)');
+	state $sqs_pathForElementID = newSqlCmd(CONST::IDX_SQS, 'path;tmp_paths;where=element_id=?');
+	state $sqs_nameForNonFileID = newSqlCmd(CONST::IDX_SQS, 'name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id;where=element_id=?');
+	state $sqs_nameForFileID = newSqlCmd(CONST::IDX_SQS, 'path_names.name,path_names2.name;path_elements JOIN path_names ON path_names.name_id=path_elements.name_id LEFT JOIN element_extensions ON element_extensions.element_id=path_elements.element_id LEFT JOIN path_names AS path_names2 ON path_names2.name_id=element_extensions.name_id;where=path_elements.element_id=?');
+	state $sqs_pidForElementID = newSqlCmd(CONST::IDX_SQS, 'parent_id;element_parents;where=element_id=?');
 	
 	defined($MY_CURSOR) || die;
 	$MY_CURSOR->execute($cmd_createTmpPathsTable);
@@ -600,7 +616,7 @@ sub getDirHash
 {
 	#element_parents.element_id, -- not part of query because not used
 	# only useful for debugging
-	state $sqs_elementsInDir = {'sqs' => 'name,type_id,hash,size,target;element_parents JOIN path_elements ON element_parents.element_id=path_elements.element_id JOIN path_names ON path_elements.name_id=path_names.name_id LEFT JOIN element_hash ON element_parents.element_id=element_hash.element_id LEFT JOIN element_size ON element_parents.element_id=element_size.element_id LEFT JOIN element_link ON element_parents.element_id=element_link.element_id;where=parent_id=?;order_by=element_parents.element_id ASC'};
+	state $sqs_elementsInDir = newSqlCmd(CONST::IDX_SQS, 'name,type_id,hash,size,target;element_parents JOIN path_elements ON element_parents.element_id=path_elements.element_id JOIN path_names ON path_elements.name_id=path_names.name_id LEFT JOIN element_hash ON element_parents.element_id=element_hash.element_id LEFT JOIN element_size ON element_parents.element_id=element_size.element_id LEFT JOIN element_link ON element_parents.element_id=element_link.element_id;where=parent_id=?;order_by=element_parents.element_id ASC');
 	state $hashObj = undef;
 	state $name = undef;
 	state $type_id = undef;
@@ -685,12 +701,12 @@ sub getCommonPathPrefix
 sub getInfoForElement
 {
 	state $newFileCmdList = [
-		{'cmd' => 'INSERT INTO element_size(element_id,size) VALUES (?,?)'},
-		{'cmd' => 'INSERT INTO element_lastmodified(element_id,last_modified) VALUES (?,?)'},
-		{'cmd' => 'INSERT INTO element_hash(element_id,hash) VALUES (?,?)'}
+		newSqlCmd(CONST::IDX_CMD, 'INSERT INTO element_size(element_id,size) VALUES (?,?)'),
+		newSqlCmd(CONST::IDX_CMD, 'INSERT INTO element_lastmodified(element_id,last_modified) VALUES (?,?)'),
+		newSqlCmd(CONST::IDX_CMD, 'INSERT INTO element_hash(element_id,hash) VALUES (?,?)')
 	];
-	state $cmd_newSymlink = {'cmd' => 'INSERT INTO element_link(element_id,target) VALUES (?,?)'};
-	state $cmd_newDir = {'cmd' => 'INSERT INTO element_hash(element_id,hash) VALUES (?,?)'};
+	state $cmd_newSymlink = newSqlCmd(CONST::IDX_CMD, 'INSERT INTO element_link(element_id,target) VALUES (?,?)');
+	state $cmd_newDir = newSqlCmd(CONST::IDX_CMD, 'INSERT INTO element_hash(element_id,hash) VALUES (?,?)');
 	#
 	defined($MY_CURSOR) || die;
 	my ($element_id, $type_id, $abs_src_root_path, $abs_path) = @_;
@@ -760,10 +776,10 @@ sub gatherElementInfo
 	state $fmt_progress = "%3d.%03d%%\r";
 	state $atMin = sprintf($fmt_progress, 0, 0);
 	state $atMax = sprintf(substr($fmt_progress, 0, -1) . "\n", 100, 0);
-	state $sqs_numElements = {'sqs' => 'COUNT(*);path_elements'};
-	state $sqs_numOfType = {'sqs' => 'COUNT(*);path_elements;where=type_id=?'};
-	state $sqs_elementAndType_ascID_notType = {'sqs' => 'element_id,type_id;path_elements;where=type_id<>?;order_by=element_id ASC'};
-	state $sqs_element_descID_ofType = {'sqs' => 'element_id;path_elements;where=type_id=?;order_by=element_id DESC'};
+	state $sqs_numElements = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements');
+	state $sqs_numOfType = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=type_id=?');
+	state $sqs_elementAndType_ascID_notType = newSqlCmd(CONST::IDX_SQS, 'element_id,type_id;path_elements;where=type_id<>?;order_by=element_id ASC');
+	state $sqs_element_descID_ofType = newSqlCmd(CONST::IDX_SQS, 'element_id;path_elements;where=type_id=?;order_by=element_id DESC');
 	state $ioStatePre = undef;
 	state $old_fh = undef;
 	state $doF = sub
@@ -1024,10 +1040,10 @@ sub getSnapshotDiff
 	};
 	state $doF = sub
 	{
-		state $sqs_getPathElementCount = {'sqs' => 'COUNT(*);path_elements'};
-		state $sqs_getTopPathElementCount = {'sqs' => 'COUNT(*);path_elements;where=element_id>=?'};
-		state $sqs_getMatchPathElementCount = {'sqs' => 'COUNT(*);path_elements;where=element_id=?'};
-		state $sqs_getAllElements = {'sqs' => 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC'};
+		state $sqs_getPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements');
+		state $sqs_getTopPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id>=?');
+		state $sqs_getMatchPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id=?');
+		state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC');
 		$callDepth++;
 		my ($dbPath1, $dbPath2) = @_;
 		
