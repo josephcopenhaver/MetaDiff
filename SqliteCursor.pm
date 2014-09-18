@@ -34,91 +34,72 @@ sub sql_sprintf
 
 ## CLASS STRUCT ##
 my %activeInstances = ();
-my $jitCreated = 0;
 
 sub new
 {
     my $class = $_[0];
-    my $dbh = $_[1];
-    my @statements;
-    my $self = {
-        execute => sub
-        {
-			die unless defined($dbh);
-			my $ref = $_[1];
-            warn sprintf("E_PS: %s\n", sql_sprintf($ref->[CONST::IDX_CMD], quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
-            my $sth_ = $ref->[CONST::IDX_STH];
-			my $sth;
-			if (!defined($sth_))
-			{
-				$sth_ = {};
-				$ref->[CONST::IDX_STH] = $sth_;
-				$sth = undef;
-			}
-			else
-			{
-				$sth = $sth_->{$dbh};
-			}
-            if (!defined($sth))
-            {
-                my $_sth = undef;
-                $sth = \$_sth;
-                $sth_->{$dbh} = $sth;
-                push(@statements, $sth_);
-            }
-            if (!defined($$sth))
-            {
-                $$sth = $dbh->prepare($ref->[CONST::IDX_CMD]) || die
-            }
-            my $_sth = $$sth;
-            $_sth->execute(@_[2..$#_]) || die;
-            return $_sth;
-        },
-        destroy => sub
-        {
-			die unless defined($dbh);
-			my $dbh_old = $dbh;
-            # clear out dbh
-			$dbh = undef;
-            delete $activeInstances{$_[0]};
-            while (my $sth_ref = pop(@statements))
-            {
-                my $sth = $sth_ref->{$dbh_old};
-                delete $sth_ref->{$dbh_old};
-                if (defined(my $_sth = $$sth))
-                {
-                    $_sth->finish;
-                    $$sth = undef;
-                }
-            }
-        },
-        lastrowid => sub
-        {
-			die unless defined($dbh);
-            return $dbh->sqlite_last_insert_rowid();
-        }
-    };
-    if (!$jitCreated)
-    {
-        $jitCreated = 1;
-        no strict 'refs';
-        foreach my $k (keys %$self)
-        {
-            my $absRefName = sprintf("%s::%s", $class, $k);
-            if (ref($self->{$k}) eq 'CODE')
-            {
-                *{$absRefName} = sub { return $_[0]->{$k}->(@_); };
-            }
-            else
-            {
-                *{$absRefName} = sub { return $_[0]->{$k}; };
-            }
-        }
-        use strict 'refs';
-    }
+	my $self = [$_[1], []];
     bless $self, $class;
     $activeInstances{$self} = $self;
     return $self;
+}
+
+sub execute
+{
+	my ($dbh, $statementsRef) = @{$_[0]};
+	die unless defined($dbh);
+	my $ref = $_[1];
+	warn sprintf("E_PS: %s\n", sql_sprintf($ref->[CONST::IDX_CMD], quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
+	my $sth_ = $ref->[CONST::IDX_STH];
+	my $sth;
+	if (!defined($sth_))
+	{
+		$sth_ = {};
+		$ref->[CONST::IDX_STH] = $sth_;
+		$sth = undef;
+	}
+	else
+	{
+		$sth = $sth_->{$dbh};
+	}
+	if (!defined($sth))
+	{
+		my $_sth = undef;
+		$sth = \$_sth;
+		$sth_->{$dbh} = $sth;
+		push(@$statementsRef, $sth_);
+	}
+	if (!defined($$sth))
+	{
+		$$sth = $dbh->prepare($ref->[CONST::IDX_CMD]) || die
+	}
+	my $_sth = $$sth;
+	$_sth->execute(@_[2..$#_]) || die;
+	return $_sth;
+}
+
+sub destroy
+{
+	my ($dbh, $statementsRef) = @{$_[0]};
+	die unless defined($dbh);
+	# clear out dbh
+	$_[0]->[0] = undef;
+	delete $activeInstances{$_[0]};
+	while (my $sth_ref = pop(@$statementsRef))
+	{
+		my $sth = $sth_ref->{$dbh};
+		delete $sth_ref->{$dbh};
+		if (defined(my $_sth = $$sth))
+		{
+			$_sth->finish;
+			$$sth = undef;
+		}
+	}
+}
+
+sub lastrowid
+{
+	return $_[0]->[0]->sqlite_last_insert_rowid();
 }
 
 sub destroyAll
