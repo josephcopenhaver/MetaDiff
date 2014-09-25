@@ -991,7 +991,7 @@ sub strcmp_b
 	
 	do
 	{
-		$r = (substr($a, $i, 1) <=> substr($b, $i, 1));
+		$r = (ord(substr($a, $i, 1)) <=> ord(substr($b, $i, 1)));
 		$i++;
 	} while($i < $t && $r == 0);
 	
@@ -1040,22 +1040,38 @@ sub getSnapshotDiff
 	};
 	state $doF = sub
 	{
+		state $dbiHeaderFmt = 'DBI:SQLite:dbname=%s';
 		state $sqs_getPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements');
 		state $sqs_getTopPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id>=?');
 		state $sqs_getMatchPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id=?');
 		state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC');
 		$callDepth++;
-		my ($dbPath1, $dbPath2) = @_;
-		
+		my ($dbPath1, $dbPath2, $srcFH) = @_;
+
+		$srcFH = FileHandle->new($dbPath1, '<') || die;
+		binmode($srcFH) || die;
+
 		($tmpFH1, $tmpFile1) = tempfile(SUFFIX => '_jcope_mdif.1.snap', UNLINK => 1);
-		copy($dbPath1, $tmpFH1) || die;
+		$tmpFH1 || die;
+		binmode($tmpFH1) || die;
+		copy($srcFH, $tmpFH1) || die;
+		$srcFH->close() || die;
+		$tmpFH1->flush() || die;
+
+		$srcFH = FileHandle->new($dbPath2, '<') || die;
+		binmode($srcFH) || die;
+
 		($tmpFH2, $tmpFile2) = tempfile(SUFFIX => '_jcope_mdif.2.snap', UNLINK => 1);
-		copy($dbPath2, $tmpFH2) || die;
+		$tmpFH2 || die;
+		binmode($tmpFH2) || die;
+		copy($srcFH, $tmpFH2) || die;
+		$srcFH->close() || die;
+		$tmpFH2->flush() || die;
 		
-		my $dbh1 = sprintf('DBI:SQLite:dbname=%s', $dbPath1);
+		my $dbh1 = sprintf($dbiHeaderFmt, $dbPath1);
 		my $dbh1ReadOnly = DBI->connect($dbh1, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
 		$dbh1ReadOnly = SqliteCursor->new($dbh1ReadOnly);
-		$dbh1 = DBI->connect($dbh1, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		$dbh1 = DBI->connect(sprintf($dbiHeaderFmt, $tmpFile1), '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
 		$dbh1 = SqliteCursor->new($dbh1);
 		
 		$MY_CURSOR = $dbh1;
@@ -1068,10 +1084,10 @@ sub getSnapshotDiff
 		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
 		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
 		
-		my $dbh2 = sprintf('DBI:SQLite:dbname=%s', $dbPath2);
+		my $dbh2 = sprintf($dbiHeaderFmt, $dbPath2);
 		my $dbh2ReadOnly = DBI->connect($dbh2, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
 		$dbh2ReadOnly = SqliteCursor->new($dbh2ReadOnly);
-		$dbh2 = DBI->connect($dbh2, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		$dbh2 = DBI->connect(sprintf($dbiHeaderFmt, $tmpFile2), '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
 		$dbh2 = SqliteCursor->new($dbh2);
 		
 		$MY_CURSOR = $dbh2;

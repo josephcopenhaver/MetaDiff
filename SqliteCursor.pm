@@ -2,6 +2,7 @@ package SqliteCursor;
 
 use strict;
 use CONST;
+#use Scalar::Util 'weaken';#Future use?
 
 
 ## HELPERS ##
@@ -38,7 +39,7 @@ my %activeInstances = ();
 sub new
 {
     my $class = $_[0];
-	my $self = [$_[1], []];
+    my $self = [$_[1], []];
     bless $self, $class;
     $activeInstances{$self} = $self;
     return $self;
@@ -46,53 +47,53 @@ sub new
 
 sub execute
 {
-	my ($dbh, $statementsRef) = @{$_[0]};
+	my ($dbh, $arr_hash_sthPtr_by_dbh) = @{$_[0]};
 	die unless defined($dbh);
 	my $ref = $_[1];
 	warn sprintf("E_PS: %s\n", sql_sprintf($ref->[CONST::IDX_CMD], quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
-	my $sth_ = $ref->[CONST::IDX_STH];
-	my $sth;
-	if (!defined($sth_))
+	my $hash_sthPtr_by_dbh = $ref->[CONST::IDX_STH];
+	my $sthPtr;
+	if (!defined($hash_sthPtr_by_dbh))
 	{
-		$sth_ = {};
-		$ref->[CONST::IDX_STH] = $sth_;
-		$sth = undef;
+		$hash_sthPtr_by_dbh = {};
+		$ref->[CONST::IDX_STH] = $hash_sthPtr_by_dbh;
+		$sthPtr = undef;
 	}
 	else
 	{
-		$sth = $sth_->{$dbh};
+		$sthPtr = $hash_sthPtr_by_dbh->{$dbh};
 	}
-	if (!defined($sth))
+	if (!defined($sthPtr))
 	{
-		my $_sth = undef;
-		$sth = \$_sth;
-		$sth_->{$dbh} = $sth;
-		push(@$statementsRef, $sth_);
+		my $sth = undef;
+		$sthPtr = \$sth;
+		$hash_sthPtr_by_dbh->{$dbh} = $sthPtr;
+		push(@$arr_hash_sthPtr_by_dbh, $hash_sthPtr_by_dbh);
 	}
-	if (!defined($$sth))
+	if (!defined($$sthPtr))
 	{
-		$$sth = $dbh->prepare($ref->[CONST::IDX_CMD]) || die
+		$$sthPtr = $dbh->prepare($ref->[CONST::IDX_CMD]) || die
 	}
-	my $_sth = $$sth;
-	$_sth->execute(@_[2..$#_]) || die;
-	return $_sth;
+	my $sth = $$sthPtr;
+	$sth->execute(@_[2..$#_]) || die;
+	return $sth;
 }
 
 sub destroy
 {
-	my ($dbh, $statementsRef) = @{$_[0]};
+	my ($dbh, $arr_hash_sthPtr_by_dbh) = @{$_[0]};
 	die unless defined($dbh);
 	# clear out dbh
 	$_[0]->[0] = undef;
 	delete $activeInstances{$_[0]};
-	while (my $sth_ref = pop(@$statementsRef))
+	while (my $hash_sthPtr_by_dbh = pop(@$arr_hash_sthPtr_by_dbh))
 	{
-		my $sth = $sth_ref->{$dbh};
-		delete $sth_ref->{$dbh};
-		if (defined(my $_sth = $$sth))
+		my $sthPtr = $hash_sthPtr_by_dbh->{$dbh};
+		delete $hash_sthPtr_by_dbh->{$dbh};
+		if (defined(my $sth = $$sthPtr))
 		{
-			$_sth->finish;
-			$$sth = undef;
+			$sth->finish;
+			$$sthPtr = undef;
 		}
 	}
 }
