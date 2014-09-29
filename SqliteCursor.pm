@@ -87,9 +87,14 @@ sub execute
 	return $sth;
 }
 
+sub getDBH
+{
+	return $_[0]->[0];
+}
+
 sub destroy
 {
-	my ($dbh, $arr_hash_sthPtr_by_dbh) = @{$_[0]};
+	my ($dbh, $arr_hash_sthPtr_by_dbh, $doDBH_disconnect) = (@{$_[0]}, $_[1]);
 	die unless defined($dbh);
 	# clear out dbh
 	$_[0]->[0] = undef;
@@ -103,6 +108,11 @@ sub destroy
 			$sth->finish;
 			$$sthPtr = undef;
 		}
+	}
+	#
+	if ($doDBH_disconnect)
+	{
+		$dbh->disconnect();
 	}
 }
 

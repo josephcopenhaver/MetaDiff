@@ -1281,7 +1281,8 @@ sub getSnapshotDiff
 		
 		print "END DIFF\n";
 		
-		
+		$dbh1->destroy(1);
+		$dbh2->destroy(1);
 	};
 	
 	# not re-entrant
