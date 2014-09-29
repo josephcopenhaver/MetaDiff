@@ -2,7 +2,7 @@ package SqliteCursor;
 
 use strict;
 use CONST;
-#use Scalar::Util 'weaken';#Future use?
+use Scalar::Util 'weaken';
 
 
 ## HELPERS ##
@@ -51,23 +51,31 @@ sub execute
 	die unless defined($dbh);
 	my $ref = $_[1];
 	warn sprintf("E_PS: %s\n", sql_sprintf($ref->[CONST::IDX_CMD], quoteList($dbh, @_[2..$#_]))) if CONST::DEBUG;
-	my $hash_sthPtr_by_dbh = $ref->[CONST::IDX_STH];
-	my $sthPtr;
+	my ($lastDBH, $sthPtr, $hash_sthPtr_by_dbh) = @$ref[CONST::IDX_DBH,CONST::IDX_STH,CONST::IDX_STH_HASH];
 	if (!defined($hash_sthPtr_by_dbh))
 	{
 		$hash_sthPtr_by_dbh = {};
-		$ref->[CONST::IDX_STH] = $hash_sthPtr_by_dbh;
+		$ref->[CONST::IDX_STH_HASH] = $hash_sthPtr_by_dbh;
 		$sthPtr = undef;
 	}
-	else
+	elsif (!($lastDBH == $dbh))
 	{
 		$sthPtr = $hash_sthPtr_by_dbh->{$dbh};
+		$ref->[CONST::IDX_DBH] = $dbh;
+		weaken($ref->[CONST::IDX_DBH]);
+		if (defined($sthPtr))
+		{
+			$ref->[CONST::IDX_STH] = $sthPtr;
+			weaken($ref->[CONST::IDX_STH]);
+		}
 	}
 	if (!defined($sthPtr))
 	{
 		my $sth = undef;
 		$sthPtr = \$sth;
 		$hash_sthPtr_by_dbh->{$dbh} = $sthPtr;
+		$ref->[CONST::IDX_STH] = $sthPtr;
+		weaken($ref->[CONST::IDX_STH]);
 		push(@$arr_hash_sthPtr_by_dbh, $hash_sthPtr_by_dbh);
 	}
 	if (!defined($$sthPtr))

@@ -35,11 +35,11 @@ sub newSqlCmd
 	
 	if (CONST::IDX_SQS == $idx)
 	{
-		return [undef, undef, $val];
+		return [undef, undef, undef, undef, $val];
 	}
 	if (CONST::IDX_CMD == $idx)
 	{
-		return [undef, $val];
+		return [undef, undef, undef, $val];
 	}
 	
 	die;
@@ -227,7 +227,7 @@ sub compileSQS
     my $rval;
     if (defined($rval = $sthBySQS->{$sqs}))
     {
-        $ref->[CONST::IDX_STH] = $rval;
+        $ref->[CONST::IDX_STH_HASH] = $rval;
         $rval = undef;
     }
     else
@@ -304,7 +304,7 @@ sub get
     my $sth = $MY_CURSOR->execute(@_[3..$#_]);
     if (defined($sthBySQS))
     {
-        $sthBySQS->{$spec->[CONST::IDX_SQS]} = $spec->[CONST::IDX_STH];
+        $sthBySQS->{$spec->[CONST::IDX_SQS]} = $spec->[CONST::IDX_STH_HASH];
     }
     my @row = $sth->fetchrow_array();
     my $numColumns = scalar(@row);
