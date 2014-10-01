@@ -1,17 +1,22 @@
 use strict;
 use Cwd 'abs_path';
 use File::Basename;
+use File::Path qw(make_path remove_tree);
+#use File::Spec;
 
 my $testPath = dirname(abs_path($0));
 my $rootPath = dirname($testPath);
+my $tmpDir = "$testPath/tmp";
 
 print "ROOTPATH=$rootPath\n";
 
 my @cmds = (
 	[
 		1,
-		"mkdir",
-		"tmp"
+		sub
+		{
+			return (remove_tree($tmpDir) && make_path($tmpDir)) ? 1 : 0;
+		}
 	],
 	[
 		0,
@@ -19,7 +24,7 @@ my @cmds = (
 		"$rootPath/metaDiff.pl",
 		"snapshot",
 		"$testPath/test1/a",
-		"$testPath/tmp/a.db.sqlite"
+		"$tmpDir/a.db.sqlite"
 	],
 	[
 		0,
@@ -27,15 +32,15 @@ my @cmds = (
 		"$rootPath/metaDiff.pl",
 		"snapshot",
 		"$testPath/test1/b",
-		"$testPath/tmp/b.db.sqlite"
+		"$tmpDir/b.db.sqlite"
 	],
 	[
 		0,
 		"perl",
 		"$rootPath/metaDiff.pl",
 		"diff",
-		"$testPath/tmp/a.db.sqlite",
-		"$testPath/tmp/b.db.sqlite"
+		"$tmpDir/a.db.sqlite",
+		"$tmpDir/b.db.sqlite"
 	]
 );
 
@@ -52,7 +57,7 @@ sub logCmd
 		{
 			$isNotFirst = 1;
 		}
-		if (/"/)
+		if (/["\s\r\n]/)
 		{
 			my $e = $_;
 			$e =~ s/"/""/;
@@ -70,10 +75,17 @@ sub logCmd
 
 foreach (@cmds)
 {
-	my ($cmdStruct, $nonStrict) = ($_, $_->[0]);
-	my @cmd = @$cmdStruct[1..(scalar(@$cmdStruct)-1)];
-	logCmd(@cmd);
-	(system(@cmd) >> 8) == 0 || $nonStrict || die;
+	if ($_->[0])
+	{
+		# perl command
+		$_->[1]->() || die;
+	}
+	else
+	{
+		my @cmd = @$_[1..(scalar(@$_)-1)];
+		logCmd(@cmd);
+		(system(@cmd) >> 8) == 0 || die;
+	}
 }
 
 __END__
