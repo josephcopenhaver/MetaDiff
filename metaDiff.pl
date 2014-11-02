@@ -1031,7 +1031,10 @@ sub getSnapshotDiff
 			if (defined($fh1))
 			{
 				doF(sub{
-					close($fh1) || die;
+					if (defined $fh1)
+					{
+						close($fh1) || die;
+					}
 				},sub{
 					unlink($fpath1) || die;
 				});
@@ -1040,7 +1043,10 @@ sub getSnapshotDiff
 			if (defined($fh2))
 			{
 				doF(sub{
-					close($fh2) || die;
+					if (defined $fh2)
+					{
+						close($fh2) || die;
+					}
 				},sub{
 					unlink($fpath2) || die;
 				});
@@ -1055,7 +1061,7 @@ sub getSnapshotDiff
 		state $sqs_getMatchPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id=?');
 		state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC');
 		$callDepth++;
-		my ($dbPath1, $dbPath2, $srcFH) = @_;
+		my ($dbPath1, $dbPath2, $srcFH, $tmpFH_n) = @_;
 
 		$srcFH = FileHandle->new($dbPath1, '<') || die;
 		binmode($srcFH) || die;
@@ -1066,6 +1072,10 @@ sub getSnapshotDiff
 		copy($srcFH, $tmpFH1) || die;
 		$srcFH->close() || die;
 		$tmpFH1->flush() || die;
+		$tmpFH_n = $tmpFH1;
+		undef($tmpFH1);
+		$tmpFH_n->close() || die;
+		undef($tmpFH_n);
 
 		$srcFH = FileHandle->new($dbPath2, '<') || die;
 		binmode($srcFH) || die;
@@ -1076,6 +1086,10 @@ sub getSnapshotDiff
 		copy($srcFH, $tmpFH2) || die;
 		$srcFH->close() || die;
 		$tmpFH2->flush() || die;
+		$tmpFH_n = $tmpFH2;
+		undef($tmpFH2);
+		$tmpFH_n->close() || die;
+		undef($tmpFH_n);
 		
 		my $dbh1 = sprintf($dbiHeaderFmt, $dbPath1);
 		my $dbh1ReadOnly = DBI->connect($dbh1, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;

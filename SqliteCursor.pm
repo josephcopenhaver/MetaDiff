@@ -80,7 +80,8 @@ sub execute
 	}
 	if (!defined($$sthPtr))
 	{
-		$$sthPtr = $dbh->prepare($ref->[CONST::IDX_CMD]) || die
+		#print "\n";print $ref->[CONST::IDX_CMD];print "\n";STDOUT->flush();
+		$$sthPtr = $dbh->prepare($ref->[CONST::IDX_CMD]) || die;
 	}
 	my $sth = $$sthPtr;
 	$sth->execute(@_[2..$#_]) || die;
