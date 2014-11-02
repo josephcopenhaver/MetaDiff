@@ -308,12 +308,16 @@ sub get
     }
     my @row = $sth->fetchrow_array();
     my $numColumns = scalar(@row);
-    $graceful || $numColumns || die;
+    my $err = $sth->err;
     
+    if ($err || !($graceful || $numColumns))
+    {
+        $sth->finish;
+        die $err;
+    }
     if (!$numColumns)
     {
-        #assert no error
-        die $sth->err if $sth->err;
+        $sth->finish;
 		if ($multipleRows && $fetchAll)
 		{
 			return @row;
@@ -331,9 +335,14 @@ sub get
         my $ref;# $ref appears to be a reused pointer in the supplying module, must deference it!
         while ($ref = $sth->fetchrow_arrayref)
         {
+            if ($err = $sth->err)
+            {
+                $sth->finish;
+                die $err;
+            }
             push(@rval, [@$ref]);
         }
-        die $sth->err if $sth->err;
+        $sth->finish;
         return @rval;
     }
     else
