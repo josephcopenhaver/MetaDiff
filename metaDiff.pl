@@ -1044,6 +1044,7 @@ sub getSnapSysDiff
 		state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC');
 		$callDepth++;
 		my ($dbPath1, $dirPath2, $srcFH, $tmpFH_n) = @_;
+		$dirPath2 =~ s/[\\\/]+$//;
 
 		$srcFH = FileHandle->new($dbPath1, '<') || die;
 		binmode($srcFH) || die;
@@ -1079,9 +1080,9 @@ sub getSnapSysDiff
 		my @row1 = ();
 		$cb1 = sub {
 			my $removePrefix = quotemeta($dirPath2);
-			my $removePrefixRegex = $removePrefix;
+			my $removePrefixRegex = qr/^$removePrefix\//;
 			$removePrefix = sub {
-				return ($_[0] =~ /^$removePrefixRegex\//) ? $' : $_[0];
+				return ($_[0] =~ $removePrefixRegex) ? $' : $_[0];
 			};
 			$MY_CURSOR = $dbh1;
 			$cb1 = sub {
@@ -1116,7 +1117,7 @@ sub getSnapSysDiff
 								}
 								foreach (sort(@list))
 								{
-									push(@$elementsInDir, sprintf("%s%s%s", $nextDir, ((defined $nextDir) ? '/' : ''), $_));
+									push(@$elementsInDir, ((defined $nextDir) ? sprintf("%s/%s", $nextDir, $_) : $_));
 								}
 							}
 						},sub{
