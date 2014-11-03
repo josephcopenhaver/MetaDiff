@@ -1019,38 +1019,54 @@ sub getSnapshotDiff
 	state $tmpFile1 = undef;
 	state $tmpFH2 = undef;
 	state $tmpFile2 = undef;
+	state $sth1 = undef;
+	state $sth2 = undef;
 	state $doL = sub
 	{
 		$callDepth--;
-		my ($fh1, $fpath1, $fh2, $fpath2) = ($tmpFH1, $tmpFile1, $tmpFH2, $tmpFile2);
+		my ($l_sth1, $l_sth2, $fh1, $fpath1, $fh2, $fpath2) = ($sth1, $sth2, $tmpFH1, $tmpFile1, $tmpFH2, $tmpFile2);
+		$sth1 = undef;
+		$sth2 = undef;
 		$tmpFH1 = undef;
 		$tmpFile1 = undef;
 		$tmpFH2 = undef;
 		$tmpFile2 = undef;
 		doF(sub{
-			if (defined($fh1))
-			{
-				doF(sub{
-					if (defined $fh1)
-					{
-						close($fh1) || die;
-					}
-				},sub{
-					unlink($fpath1) || die;
-				});
-			}
+			doF(sub{
+				if (defined $l_sth1) {
+					$l_sth1->finish;
+				}
+			},sub{
+				if (defined $l_sth2) {
+					$l_sth2->finish;
+				}
+			});
 		},sub{
-			if (defined($fh2))
-			{
-				doF(sub{
-					if (defined $fh2)
-					{
-						close($fh2) || die;
-					}
-				},sub{
-					unlink($fpath2) || die;
-				});
-			}
+			doF(sub{
+				if (defined($fh1))
+				{
+					doF(sub{
+						if (defined $fh1)
+						{
+							close($fh1) || die;
+						}
+					},sub{
+						unlink($fpath1) || die;
+					});
+				}
+			},sub{
+				if (defined($fh2))
+				{
+					doF(sub{
+						if (defined $fh2)
+						{
+							close($fh2) || die;
+						}
+					},sub{
+						unlink($fpath2) || die;
+					});
+				}
+			});
 		});
 	};
 	state $doF = sub
@@ -1128,8 +1144,6 @@ sub getSnapshotDiff
 		my @row1 = get(1, 1, 0, $sqs_getAllElements);
 		
 		
-		my $sth1 = undef;
-		my $sth2 = undef;
 		if (defined($row1[0]))
 		{
 			$sth1 = shift(@row1);
