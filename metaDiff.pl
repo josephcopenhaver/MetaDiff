@@ -1012,8 +1012,188 @@ sub printChange
 	printf("%s: %s\n", @_);
 }
 
+sub getSnapSysDiff
+{
+	state $callDepth = 0;
+	state $tmpFH1 = undef;
+	state $tmpFile1 = undef;
+	state $doL = sub
+	{
+		$callDepth--;
+		my ($fh1, $fpath1) = ($tmpFH1, $tmpFile1);
+		$tmpFH1 = undef;
+		$tmpFile1 = undef;
+		if (defined($fh1))
+		{
+			doF(sub{
+				if (defined $fh1)
+				{
+					close($fh1) || die;
+				}
+			},sub{
+				unlink($fpath1) || die;
+			});
+		}
+	};
+	state $doF = sub
+	{
+		state $dbiHeaderFmt = 'DBI:SQLite:dbname=%s';
+		state $sqs_getPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements');
+		state $sqs_getTopPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id>=?');
+		state $sqs_getMatchPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id=?');
+		state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC');
+		$callDepth++;
+		my ($dbPath1, $dirPath2, $srcFH, $tmpFH_n) = @_;
+
+		$srcFH = FileHandle->new($dbPath1, '<') || die;
+		binmode($srcFH) || die;
+
+		($tmpFH1, $tmpFile1) = tempfile(SUFFIX => '_jcope_mdif.1.snap', UNLINK => 1);
+		$tmpFH1 || die;
+		binmode($tmpFH1) || die;
+		copy($srcFH, $tmpFH1) || die;
+		$srcFH->close() || die;
+		$tmpFH1->flush() || die;
+		$tmpFH_n = $tmpFH1;
+		undef($tmpFH1);
+		$tmpFH_n->close() || die;
+		undef($tmpFH_n);
+		
+		my $dbh1 = sprintf($dbiHeaderFmt, $dbPath1);
+		my $dbh1ReadOnly = DBI->connect($dbh1, '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		$dbh1ReadOnly = SqliteCursor->new($dbh1ReadOnly);
+		$dbh1 = DBI->connect(sprintf($dbiHeaderFmt, $tmpFile1), '', '', { RaiseError => 1, AutoCommit => 0 }) or die $DBI::errstr;
+		$dbh1 = SqliteCursor->new($dbh1);
+		
+		$MY_CURSOR = $dbh1;
+		
+		my $count = getOne($sqs_getPathElementCount);
+		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
+		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
+		$MY_CURSOR = $dbh1ReadOnly;
+		getOne($sqs_getPathElementCount) == $count || die;
+		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
+		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
+
+		my ($cb1, $cb);
+		my @row1 = ();
+		$cb1 = sub {
+			my $removePrefix = quotemeta($dirPath2);
+			my $removePrefixRegex = $removePrefix;
+			$removePrefix = sub {
+				return ($_[0] =~ /^$removePrefixRegex\//) ? $' : $_[0];
+			};
+			$MY_CURSOR = $dbh1;
+			$cb1 = sub {
+				state $notDone = 1;
+				state $path1 = undef;
+				state $stack = [];
+				state $elementsInDir = [];
+				state $localPath = undef;
+				state $absPath = undef;
+				state $parentDir = undef;
+				state $nextDir = $dirPath2;
+				#print "'";foreach (@_){if(!defined($_)){$_ = '';}s/'/''/;print $_;last;};foreach (@_[1..$#_]){if(!defined($_)){$_ = '';}s/'/''/;print "', '";print $_;};print "'\n";STDOUT->flush();
+				while ($notDone)
+				{
+					if (defined($nextDir) && !scalar(@$elementsInDir))
+					{
+						#print $nextDir . "\n";
+						opendir(DIR, $nextDir) || die;
+						doF(sub{
+							my @list = ();
+							while ($_ = readdir(DIR))
+							{
+								next if (m/^\.\.?$/);
+								push(@list, $_);
+							}
+							if (scalar(@list))
+							{
+								$nextDir = $removePrefix->($nextDir);
+								if ((defined $nextDir) && $nextDir eq '')
+								{
+									$nextDir = undef;
+								}
+								foreach (sort(@list))
+								{
+									push(@$elementsInDir, sprintf("%s%s%s", $nextDir, ((defined $nextDir) ? '/' : ''), $_));
+								}
+							}
+						},sub{
+							closedir(DIR);
+							$parentDir = $nextDir;
+							$nextDir = undef;
+						});
+					}
+					if (!scalar(@$elementsInDir))
+					{
+						if (scalar(@$stack))
+						{
+							#pop out of dir and continue
+							$parentDir = pop(@$stack);
+							$elementsInDir = pop(@$stack);
+							$absPath = undef;
+							$localPath = undef;
+							next;
+						}
+						else
+						{
+							$notDone = 0;
+							print "\n\n\n";
+							last;
+						}
+					}
+					$localPath = shift(@$elementsInDir);
+					$absPath = sprintf("%s/%s", $dirPath2, $localPath);
+					if ((!(-l $absPath)) && (-d $absPath))
+					{
+						# go into dir
+						push(@$stack, $elementsInDir);
+						push(@$stack, $parentDir);
+						$elementsInDir = [];
+						$localPath = undef;
+						$parentDir = undef;
+						$nextDir = $absPath;
+						$absPath = undef;
+					}
+					else
+					{
+						print((-l $absPath) ? "L" : "F");print " ";print $localPath;print "\n";
+					}
+				}
+				#print "'";foreach (@_){if(!defined($_)){$_ = '';}s/'/''/;print $_;last;};foreach (@_[1..$#_]){if(!defined($_)){$_ = '';}s/'/''/;print "', '";print $_;};print "'\n";STDOUT->flush();
+				if (!defined($path1))
+				{
+					$path1 = getElementPath(@_[0..1]);
+					if ($_[1] == TYPE_FILE){print(($_[1] == TYPE_SYMLINK) ? 'L' : (($_[1] == TYPE_DIR) ? 'D' : (($_[1] == TYPE_FILE) ? 'F' : die())));print " ";print $path1;print "\n";}
+					$path1 = undef;
+				}
+			};
+			return $cb1->(@_);
+		};
+		$cb = sub {
+			return $cb1->(@_);
+		};
+
+		print "BEGIN DIFF\n";
+
+		doForAllRows($cb, $sqs_getAllElements);
+		
+		
+		print "END DIFF\n";
+		
+		$dbh1->destroy(1);
+	};
+	
+	# not re-entrant
+	$callDepth == 0 || die;
+	
+	return doF($doF, $doL, @_);
+}
+
 sub getSnapshotDiff
 {
+	#if (-d $_[1]){return getSnapSysDiff(@_);}
 	state $callDepth = 0;
 	state $tmpFH1 = undef;
 	state $tmpFile1 = undef;
