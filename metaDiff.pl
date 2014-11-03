@@ -1076,16 +1076,16 @@ sub getSnapSysDiff
 		getOne($sqs_getTopPathElementCount, $count) == 1 || die;
 		getOne($sqs_getMatchPathElementCount, $count) == 1 || die;
 
-		my ($cb1, $cb);
+		my ($cbPtr, $cb);
 		my @row1 = ();
-		$cb1 = sub {
+		$cbPtr = sub {
 			my $removePrefix = quotemeta($dirPath2);
 			my $removePrefixRegex = qr/^$removePrefix\//;
 			$removePrefix = sub {
 				return ($_[0] =~ $removePrefixRegex) ? $' : $_[0];
 			};
 			$MY_CURSOR = $dbh1;
-			$cb1 = sub {
+			$cbPtr = sub {
 				state $notDone = 1;
 				state $path1 = undef;
 				state $stack = [];
@@ -1170,10 +1170,10 @@ sub getSnapSysDiff
 					$path1 = undef;
 				}
 			};
-			return $cb1->(@_);
+			return $cbPtr->(@_);
 		};
 		$cb = sub {
-			return $cb1->(@_);
+			return $cbPtr->(@_);
 		};
 
 		print "BEGIN DIFF\n";
