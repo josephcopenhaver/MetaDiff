@@ -1114,7 +1114,7 @@ sub getSnapSysDiff
                     }];
                     state $cache = [undef, undef, undef, undef];
                     state $properties = [undef, undef, undef, undef];
-                    my $l_localType = $localType;
+                    my ($i, $l_localType) = ($_[0], $localType);
                     if (!defined($l_localType))
                     {
                         for (my $i=0; $i<4; $i++)
@@ -1125,7 +1125,6 @@ sub getSnapSysDiff
                         $l_localType = getPathType($absPath);
                         $localType = $l_localType;
                     }
-                    my $i = $_[0];
                     if ($i == 0)
                     {
                         # file type
