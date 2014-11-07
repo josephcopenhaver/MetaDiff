@@ -1099,7 +1099,19 @@ sub getSnapSysDiff
                 state $nextDir = $dirPath2;
                 state $localType = undef;
                 state $getFileProperty = sub {
-                    #hash,size,last_modified,target
+                    state $lookups = [sub{
+                        # 0 => hash
+                        return ($_[0] == TYPE_FILE) ? getFileHash($absPath) : undef;
+                    },sub{
+                        # 1 => size
+                        return ($_[0] == TYPE_FILE) ? getFileSize($absPath) : undef;
+                    },sub{
+                        # 2 => last_modified
+                        return ($_[0] == TYPE_FILE) ? getMTime($absPath) : undef;
+                    },sub{
+                        # 3 => target
+                        return ($_[0] == TYPE_SYMLINK) ? abs_path($absPath) : undef;
+                    }];
                     state $cache = [undef, undef, undef, undef];
                     state $properties = [undef, undef, undef, undef];
                     my $l_localType = $localType;
@@ -1113,7 +1125,7 @@ sub getSnapSysDiff
                         $l_localType = getPathType($absPath);
                         $localType = $l_localType;
                     }
-                    my $i = shift;
+                    my $i = $_[0];
                     if ($i == 0)
                     {
                         # file type
@@ -1127,30 +1139,7 @@ sub getSnapSysDiff
                     }
                     else
                     {
-                        if ($i == 3)
-                        {
-                            # target
-                            $rval = ($l_localType == TYPE_SYMLINK) ? abs_path($absPath) : undef;
-                        }
-                        elsif ($i == 2)
-                        {
-                            # last_modified
-                            $rval = ($l_localType == TYPE_FILE) ? getMTime($absPath) : undef;
-                        }
-                        elsif ($i == 1)
-                        {
-                            # size
-                            $rval = ($l_localType == TYPE_FILE) ? getFileSize($absPath) : undef;
-                        }
-                        elsif ($i == 0)
-                        {
-                            # hash
-                            $rval = ($l_localType == TYPE_FILE) ? getFileHash($absPath) : undef;
-                        }
-                        else
-                        {
-                            die;
-                        }
+                        $rval = $lookups->[$i]->($l_localType);
                         $properties->[$i] = $rval;
                         $cache->[$i] = 1;
                     }
