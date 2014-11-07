@@ -1078,97 +1078,278 @@ sub getSnapSysDiff
 
 		my ($cbPtr, $cb);
 		my @row1 = ();
+        my $isLocalTail = 0;
 		$cbPtr = sub {
 			my $removePrefix = quotemeta($dirPath2);
-			my $removePrefixRegex = qr/^$removePrefix\//;
-			$removePrefix = sub {
-				return ($_[0] =~ $removePrefixRegex) ? $' : $_[0];
+			my $removePrefixRegex1 = qr/\A$removePrefix\z/;
+            my $removePrefixRegex2 = qr/\A$removePrefix\//;
+            $removePrefix = sub {
+				return ($_[0] =~ $removePrefixRegex1 || $_[0] =~ $removePrefixRegex2) ? $' : $_[0];
 			};
 			$MY_CURSOR = $dbh1;
 			$cbPtr = sub {
-				state $notDone = 1;
-				state $path1 = undef;
-				state $stack = [];
+                state $ub = scalar(@_)-1;
+                state $notDone = 1;
+				state $l2 = undef;
+                state $stack = [];
 				state $elementsInDir = [];
 				state $localPath = undef;
 				state $absPath = undef;
 				state $parentDir = undef;
 				state $nextDir = $dirPath2;
-				#print "'";foreach (@_){if(!defined($_)){$_ = '';}s/'/''/;print $_;last;};foreach (@_[1..$#_]){if(!defined($_)){$_ = '';}s/'/''/;print "', '";print $_;};print "'\n";STDOUT->flush();
-				while ($notDone)
-				{
-					if (defined($nextDir) && !scalar(@$elementsInDir))
-					{
-						#print $nextDir . "\n";
-						opendir(DIR, $nextDir) || die;
-						doF(sub{
-							my @list = ();
-							while ($_ = readdir(DIR))
-							{
-								next if (m/^\.\.?$/);
-								push(@list, $_);
-							}
-							if (scalar(@list))
-							{
-								$nextDir = $removePrefix->($nextDir);
-								if ((defined $nextDir) && $nextDir eq '')
-								{
-									$nextDir = undef;
-								}
-								foreach (sort(@list))
-								{
-									push(@$elementsInDir, ((defined $nextDir) ? sprintf("%s/%s", $nextDir, $_) : $_));
-								}
-							}
-						},sub{
-							closedir(DIR);
-							$parentDir = $nextDir;
-							$nextDir = undef;
-						});
-					}
-					if (!scalar(@$elementsInDir))
-					{
-						if (scalar(@$stack))
-						{
-							#pop out of dir and continue
-							$parentDir = pop(@$stack);
-							$elementsInDir = pop(@$stack);
-							$absPath = undef;
-							$localPath = undef;
-							next;
-						}
-						else
-						{
-							$notDone = 0;
-							print "\n\n\n";
-							last;
-						}
-					}
-					$localPath = shift(@$elementsInDir);
-					$absPath = sprintf("%s/%s", $dirPath2, $localPath);
-					if ((!(-l $absPath)) && (-d $absPath))
-					{
-						# go into dir
-						push(@$stack, $elementsInDir);
-						push(@$stack, $parentDir);
-						$elementsInDir = [];
-						$localPath = undef;
-						$parentDir = undef;
-						$nextDir = $absPath;
-						$absPath = undef;
-					}
-					else
-					{
-						print((-l $absPath) ? "L" : "F");print " ";print $localPath;print "\n";
-					}
-				}
-				#print "'";foreach (@_){if(!defined($_)){$_ = '';}s/'/''/;print $_;last;};foreach (@_[1..$#_]){if(!defined($_)){$_ = '';}s/'/''/;print "', '";print $_;};print "'\n";STDOUT->flush();
-				if (!defined($path1))
-				{
-					$path1 = getElementPath(@_[0..1]);
-					if ($_[1] == TYPE_FILE){print(($_[1] == TYPE_SYMLINK) ? 'L' : (($_[1] == TYPE_DIR) ? 'D' : (($_[1] == TYPE_FILE) ? 'F' : die())));print " ";print $path1;print "\n";}
-					$path1 = undef;
-				}
+                state $localType = undef;
+                state $getFileProperty = sub {
+                    #hash,size,last_modified,target
+                    state $cache = [undef, undef, undef, undef];
+                    state $properties = [undef, undef, undef, undef];
+                    my $l_localType = $localType;
+                    if (!defined($l_localType))
+                    {
+                        for (my $i=0; $i<4; $i++)
+                        {
+                            $properties->[$i] = undef;
+                            $cache->[$i] = undef;
+                        }
+                        $l_localType = getPathType($absPath);
+                        $localType = $l_localType;
+                    }
+                    my $i = shift;
+                    if ($i == 0)
+                    {
+                        # file type
+                        return $l_localType;
+                    }
+                    $i-=2;
+                    my $rval;
+                    if ($cache->[$i])
+                    {
+                        $rval = $properties->[$i];
+                    }
+                    else
+                    {
+                        if ($i == 3)
+                        {
+                            # target
+                            $rval = ($l_localType == TYPE_SYMLINK) ? abs_path($absPath) : undef;
+                        }
+                        elsif ($i == 2)
+                        {
+                            # last_modified
+                            $rval = ($l_localType == TYPE_FILE) ? getMTime($absPath) : undef;
+                        }
+                        elsif ($i == 1)
+                        {
+                            # size
+                            $rval = ($l_localType == TYPE_FILE) ? getFileSize($absPath) : undef;
+                        }
+                        elsif ($i == 0)
+                        {
+                            # hash
+                            $rval = ($l_localType == TYPE_FILE) ? getFileHash($absPath) : undef;
+                        }
+                        else
+                        {
+                            die;
+                        }
+                        $properties->[$i] = $rval;
+                        $cache->[$i] = 1;
+                    }
+                    return $rval;
+                };
+                my ($l_isLocalTail, $row1Type, $path1, $l1) = ($isLocalTail);
+                if (!$l_isLocalTail)
+                {
+                    $row1Type = $_[1];
+                    $path1 = getElementPath($_[0], $row1Type);
+                    $l1 = length($path1);
+                }
+				if ($notDone)
+                {
+                    my ($same, $i, $i1, $i2, $cmp);
+                    do
+                    {{
+                        if (!defined($localPath))
+                        {
+                            my $diffDir = undef;
+                            $localType = undef;
+        					if (defined($nextDir) && !scalar(@$elementsInDir))
+        					{
+        						opendir(DIR, $nextDir) || die;
+        						doF(sub{
+        							my @list = ();
+        							while ($_ = readdir(DIR))
+        							{
+        								next if (m/^\.\.?$/);
+        								push(@list, $_);
+        							}
+                                    $nextDir = $removePrefix->($nextDir);
+        							if (scalar(@list))
+        							{
+                                        if ((defined $nextDir) && $nextDir eq '')
+        								{
+        									$nextDir = undef;
+        								}
+                                        foreach (sort(@list))
+        								{
+                                            push(@$elementsInDir, ((defined $nextDir) ? sprintf("%s/%s", $nextDir, $_) : $_));
+        								}
+        							}
+                                    if (defined $nextDir)
+                                    {
+                                        $localPath = $nextDir;
+                                        $diffDir = 1;
+                                    }
+        						},sub{
+        							closedir(DIR);
+        							$parentDir = $nextDir;
+        							$nextDir = undef;
+        						});
+        					}
+        					if ($diffDir)
+                            {
+                                $absPath = sprintf("%s/%s", $dirPath2, $localPath);
+                            }
+                            else
+                            {
+                                if (!scalar(@$elementsInDir))
+                                {
+                                    if (scalar(@$stack))
+                                    {
+                                        #pop out of dir and continue
+                                        $parentDir = pop(@$stack);
+                                        $elementsInDir = pop(@$stack);
+                                        $absPath = undef;
+                                        $localPath = undef;
+                                        next;
+                                    }
+                                    else
+                                    {
+                                        $notDone = 0;
+                                        last;
+                                    }
+                                }
+            					$localPath = shift(@$elementsInDir);
+                                $absPath = sprintf("%s/%s", $dirPath2, $localPath);
+                                if ((!(-l $absPath)) && (-d $absPath))
+            					{
+            						# go into dir
+            						push(@$stack, $elementsInDir);
+            						push(@$stack, $parentDir);
+            						$elementsInDir = [];
+            						$localPath = undef;
+            						$parentDir = undef;
+            						$nextDir = $absPath;
+            						$absPath = undef;
+                                    next;
+            					}
+                                if ($l_isLocalTail)
+                                {
+                                    printChange("ADD", $localPath);
+                                    $localPath = undef;
+                                    next;
+                                }
+                            }
+                            $l2 = length($localPath);
+                        }
+    					# do direct compare
+
+                        my $cpl = getCommonPathLength($path1, $localPath, $l1, $l2);
+                
+                
+                        if (($l1 == $l2) && ($cpl == $l1))
+                        {
+                            # same element name
+                            if ($row1Type == $getFileProperty->(0))
+                            {
+                                # types same, could be match or mod
+                                do
+                                {{
+                                    $same = 1;
+                                    if ($row1Type == TYPE_DIR)
+                                    {
+                                        # Not doing top level search for differences.
+                                        # Going deep, so do not compare meta info by dir
+                                        last;
+                                    }
+                                    for ($i=$ub;$i>1;$i--)
+                                    {
+                                        $i1 = $_[$i];
+                                        $i2 = $getFileProperty->($i);
+                                        if ((defined($i1) != defined($i2))
+                                            || (defined($i1)
+                                                && defined($i2)
+                                                #&& (($i1 <=> $i2) != 0))
+                                                #&& ($i1 ne $i2))
+                                                && (looks_like_number($i1) ? (($i1 <=> $i2) != 0) : ($i1 ne $i2)))
+                                            )
+                                        {
+                                            $same = 0;
+                                            last;
+                                        }
+                                    }
+                                }} while (0);
+                                if (!$same)
+                                {
+                                    printChange("MOD", $path1);
+                                }
+                            }
+                            else
+                            {
+                                printChange("DEL", $path1);
+                                printChange("ADD", $localPath);
+                            }
+                            $path1 = undef;
+                            $localPath = undef;
+                            return;
+                        }
+                        elsif ($cpl == $l1)
+                        {
+                            # path2 is an entry in directory named $path1
+                            # should not be reachable
+                            die;
+                        }
+                        elsif ($cpl == $l2)
+                        {
+                            # path1 is an entry in a directory named $localPath
+                            # should not be reachable
+                            die;
+                        }
+                        else
+                        {
+                            $cmp = strcmp_b($path1, $localPath, (($cpl == 0) ? 0 : ($cpl+1)), (($l1 <= $l2) ? $l1 : $l2));
+                            if ($cmp == 0)
+                            {
+                                if ($l1 == $l2)
+                                {
+                                    die;
+                                }
+                                else
+                                {
+                                    $cmp = ($l1 < $l2) ? (-1) : 1;
+                                }
+                            }
+                            if ($cmp < 0)
+                            {
+                                printChange("DEL", $path1);
+                                $path1 = undef;
+                                return;
+                            }
+                            else
+                            {
+                                printChange("ADD", $localPath);
+                                $localPath = undef;
+                            }
+                        }
+    				}} while ($notDone);
+                }
+                elsif ($l_isLocalTail)
+                {
+                    return;
+                }
+                else
+                {
+                    printChange("ADD", $path1);
+                }
 			};
 			return $cbPtr->(@_);
 		};
@@ -1179,6 +1360,8 @@ sub getSnapSysDiff
 		print "BEGIN DIFF\n";
 
 		doForAllRows($cb, $sqs_getAllElements);
+        $isLocalTail = 1;
+        $cbPtr->();
 		
 		
 		print "END DIFF\n";
@@ -1194,7 +1377,7 @@ sub getSnapSysDiff
 
 sub getSnapshotDiff
 {
-	#if (-d $_[1]){return getSnapSysDiff(@_);}
+	if (-d $_[1]){return getSnapSysDiff(@_);}
 	state $callDepth = 0;
 	state $tmpFH1 = undef;
 	state $tmpFile1 = undef;
