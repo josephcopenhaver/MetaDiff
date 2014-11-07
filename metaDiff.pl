@@ -121,10 +121,8 @@ sub doF
     };
     if ($@)
     {
-        my $__em = $@;
-        my $__eb = $!;
-        $@ = undef;
-        $! = undef;
+        my ($__em, $__eb) = ($@, $!);
+        ($@, $!) = (undef, undef);
         eval
         {{
             $doL->();
@@ -138,10 +136,6 @@ sub doF
             }
             warn "$@$e\n";
         }
-        if ($__eb)
-        {
-            $__eb = "\n$__eb";
-        }
         my @traceStep;
         my $i = 1;
         while (scalar(@traceStep = caller($i)))
@@ -149,7 +143,8 @@ sub doF
             warn sprintf("%s:%s in function %s\n", @traceStep[1..$#traceStep]);
             $i++;
         }
-        die "$__em$__eb"; # let root error trickle up
+        ($@, $!) = ($__em, $__eb);
+        die($@); # let root error trickle up
     }
     return $doL->();
 }
