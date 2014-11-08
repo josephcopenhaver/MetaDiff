@@ -1084,6 +1084,7 @@ sub getSnapSysDiff
             $MY_CURSOR = $dbh1;
             $cbPtr = sub {
                 state $ub = scalar(@_)-(CONST::DIFF_WITH_TIMESTAMPS ? 2 : 1);
+				state $timestampPropIdx = CONST::DIFF_WITH_TIMESTAMPS ? ($ub+1) : undef;
                 state $notDone = 1;
                 state $l2 = undef;
                 state $stack = [];
@@ -1255,7 +1256,7 @@ sub getSnapSysDiff
                                         # Going deep, so do not compare meta info by dir
                                         last;
                                     }
-									if (CONST::DIFF_WITH_TIMESTAMPS && ($i1 = $ub + 1) && ($_[$i1] != $getFileProperty->($i1)))
+									if (CONST::DIFF_WITH_TIMESTAMPS && ($_[$timestampPropIdx] != $getFileProperty->($timestampPropIdx)))
 									{
 										$same = 0;
 										last;

@@ -78,12 +78,13 @@ sub execute
 		weaken($ref->[CONST::IDX_STH]);
 		push(@$arr_hash_sthPtr_by_dbh, $hash_sthPtr_by_dbh);
 	}
-	if (!defined($$sthPtr))
+	my $sth = $$sthPtr;
+	if (!defined($sth))
 	{
 		#print "\n";print $ref->[CONST::IDX_CMD];print "\n";STDOUT->flush();
-		$$sthPtr = $dbh->prepare($ref->[CONST::IDX_CMD]) || die;
+		$sth = $dbh->prepare($ref->[CONST::IDX_CMD]) || die;
+		$$sthPtr = $sth;
 	}
-	my $sth = $$sthPtr;
 	$sth->execute(@_[2..$#_]) || die;
 	return $sth;
 }
