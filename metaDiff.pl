@@ -1256,9 +1256,8 @@ sub getSnapSysDiff
                                         # Going deep, so do not compare meta info by dir
                                         last;
                                     }
-									if (CONST::DIFF_WITH_TIMESTAMPS && ($_[$timestampPropIdx] != $getFileProperty->($timestampPropIdx)))
+									if (CONST::DIFF_WITH_TIMESTAMPS && ($_[$timestampPropIdx] == $getFileProperty->($timestampPropIdx)))
 									{
-										$same = 0;
 										last;
 									}
                                     for ($i=$ub;$i>1;$i--)
