@@ -1174,7 +1174,7 @@ sub getSnapSysDiff
                                         }
                                         foreach (sort(@list))
                                         {
-                                            push(@$elementsInDir, ((defined $nextDir) ? sprintf("%s/%s", $nextDir, $_) : $_));
+                                            push(@$elementsInDir, ((defined $nextDir) ? join_path($nextDir, $_) : $_));
                                         }
                                     }
                                     if (defined $nextDir)
@@ -1190,7 +1190,7 @@ sub getSnapSysDiff
                             }
                             if ($diffDir)
                             {
-                                $absPath = sprintf("%s/%s", $dirPath2, $localPath);
+                                $absPath = join_path($dirPath2, $localPath);
                             }
                             else
                             {
@@ -1212,7 +1212,7 @@ sub getSnapSysDiff
                                     }
                                 }
                                 $localPath = shift(@$elementsInDir);
-                                $absPath = sprintf("%s/%s", $dirPath2, $localPath);
+                                $absPath = join_path($dirPath2, $localPath);
                                 if ((!(-l $absPath)) && (-d $absPath))
                                 {
                                     # go into dir
