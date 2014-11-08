@@ -1036,7 +1036,7 @@ sub getSnapSysDiff
         state $sqs_getPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements');
         state $sqs_getTopPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id>=?');
         state $sqs_getMatchPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id=?');
-        state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC');
+        state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, sprintf('path_elements.element_id,type_id,hash,size,target%s;path_elements %sLEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC',(CONST::DIFF_WITH_TIMESTAMPS ? (',last_modified','LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id ') : ('',''))));
         $callDepth++;
         my ($dbPath1, $dirPath2, $srcFH, $tmpFH_n) = @_;
         $dirPath2 =~ s/[\\\/]+$//;
@@ -1083,7 +1083,7 @@ sub getSnapSysDiff
             };
             $MY_CURSOR = $dbh1;
             $cbPtr = sub {
-                state $ub = scalar(@_)-1;
+                state $ub = scalar(@_)-(CONST::DIFF_WITH_TIMESTAMPS ? 2 : 1);
                 state $notDone = 1;
                 state $l2 = undef;
                 state $stack = [];
@@ -1101,18 +1101,19 @@ sub getSnapSysDiff
                         # 1 => size
                         return ($_[0] == TYPE_FILE) ? getFileSize($absPath) : undef;
                     },sub{
-                        # 2 => last_modified
-                        return ($_[0] == TYPE_FILE) ? getMTime($absPath) : undef;
-                    },sub{
-                        # 3 => target
+                        # 2 => target
                         return ($_[0] == TYPE_SYMLINK) ? abs_path($absPath) : undef;
-                    }];
+                    },(CONST::DIFF_WITH_TIMESTAMPS ? (sub{
+                        # 3 => last_modified
+                        return ($_[0] == TYPE_FILE) ? getMTime($absPath) : undef;
+                    }) : ())];
+					state $numLookups = scalar(@$lookups);
                     state $cache = [undef, undef, undef, undef];
                     state $properties = [undef, undef, undef, undef];
                     my ($i, $l_localType) = ($_[0], $localType);
                     if (!defined($l_localType))
                     {
-                        for (my $i=0; $i<4; $i++)
+                        for (my $i=0; $i<$numLookups; $i++)
                         {
                             $properties->[$i] = undef;
                             $cache->[$i] = undef;
@@ -1254,6 +1255,11 @@ sub getSnapSysDiff
                                         # Going deep, so do not compare meta info by dir
                                         last;
                                     }
+									if (CONST::DIFF_WITH_TIMESTAMPS && ($i1 = $ub + 1) && ($_[$i1] != $getFileProperty->($i1)))
+									{
+										$same = 0;
+										last;
+									}
                                     for ($i=$ub;$i>1;$i--)
                                     {
                                         $i1 = $_[$i];
@@ -1422,7 +1428,7 @@ sub getSnapshotDiff
         state $sqs_getPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements');
         state $sqs_getTopPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id>=?');
         state $sqs_getMatchPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id=?');
-        state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, 'path_elements.element_id,type_id,hash,size,last_modified,target;path_elements LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC');
+        state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, 'path_elements.element_id,type_id,hash,size,target;path_elements LEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC');
         $callDepth++;
         my ($dbPath1, $dbPath2, $srcFH, $tmpFH_n) = @_;
 
