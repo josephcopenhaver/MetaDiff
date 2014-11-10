@@ -88,7 +88,15 @@ if ($numArgv > 0)
     elsif ($_ eq 'diff')
     {
         $numArgv == 3 || die;
-        getSnapshotDiff(@ARGV[1..$#ARGV]);
+        my $diffArg2 = $ARGV[2];
+        if (-d $diffArg2)
+        {
+            getSnapSysDiff($ARGV[1], $diffArg2);
+        }
+        else
+        {
+        getSnapshotDiff($ARGV[1], $diffArg2);
+        }
     }
     else
     {
@@ -1366,7 +1374,6 @@ sub getSnapSysDiff
 
 sub getSnapshotDiff
 {
-    if (-d $_[1]){return getSnapSysDiff(@_);}
     state $callDepth = 0;
     state $tmpFH1 = undef;
     state $tmpFile1 = undef;
