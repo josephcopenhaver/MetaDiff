@@ -1,7 +1,19 @@
 BEGIN
 {
-    use Cwd 'abs_path';
+    use Cwd;
+    use String::ShellQuote 'shell_quote';
     use File::Basename;
+    sub abs_path {
+        # because abs_path returns undef for paths that exist and are also .files
+        my $s = $_[0];
+        my $result = Cwd::abs_path($s);
+        if (!defined($result)) {
+            my $arg = shell_quote($s);
+            $result = `readlink $arg`;
+            ($? == 0 && defined($result) && $result !~ /\A\s*\z/) || die sprintf("Could not resolve symlink target of %s", $s);
+        }
+        return $result;
+    }
     push(@INC, dirname(abs_path($0)));
 }
 use strict;
@@ -67,6 +79,41 @@ use constant
     SCRIPT_CREATE_SNAPSHOT_DB => [@{+SCRIPT_CREATE_META_INFO_TABLE}, @{+SCRIPT_CREATE_SNAPSHOT_DB_BASIS}],
     SCRIPT_INIT_SNAPSHOT_DB => [sprintf('INSERT INTO path_types SELECT %d AS type_id, \'directory\' AS type_description UNION SELECT %d,\'file\' UNION SELECT %d,\'symlink\'', TYPE_DIR, TYPE_FILE, TYPE_SYMLINK)]
 };
+
+
+###
+
+
+my $diff_setting = CONST::DIFF_WITH_TIMESTAMPS;
+
+(sub{
+    my $idx = 0;
+    my $numArgs = scalar(@ARGV);
+    my $ignoreTimestamps = 0;
+    while ($idx < $numArgs) {
+        $_ = $ARGV[$idx];
+        last if ($_ eq 'diff' || $_ eq 'snapshot');
+        if ($_ eq '--use-timestamps') {
+            $diff_setting = 1;
+            splice(@ARGV, $idx, 1);
+            $numArgs--;
+            next;
+        }
+        if ($_ eq '--ignore-timestamps') {
+            $diff_setting = 0;
+            splice(@ARGV, $idx, 1);
+            $numArgs--;
+            next;
+        }
+        $idx++;
+    }
+})->();
+
+use constant {
+    OPT_DIFF_WITH_TIMESTAMPS => $diff_setting
+};
+
+undef($diff_setting);
 
 
 ###
@@ -1044,7 +1091,7 @@ sub getSnapSysDiff
         state $sqs_getPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements');
         state $sqs_getTopPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id>=?');
         state $sqs_getMatchPathElementCount = newSqlCmd(CONST::IDX_SQS, 'COUNT(*);path_elements;where=element_id=?');
-        state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, sprintf('path_elements.element_id,type_id,hash,size,target%s;path_elements %sLEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC',(CONST::DIFF_WITH_TIMESTAMPS ? (',last_modified','LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id ') : ('',''))));
+        state $sqs_getAllElements = newSqlCmd(CONST::IDX_SQS, sprintf('path_elements.element_id,type_id,hash,size,target%s;path_elements %sLEFT JOIN element_hash ON path_elements.element_id=element_hash.element_id LEFT JOIN element_size ON path_elements.element_id=element_size.element_id LEFT JOIN element_link ON path_elements.element_id=element_link.element_id;order_by=path_elements.element_id ASC',(OPT_DIFF_WITH_TIMESTAMPS ? (',last_modified','LEFT JOIN element_lastmodified ON path_elements.element_id=element_lastmodified.element_id ') : ('',''))));
         $callDepth++;
         my ($dbPath1, $dirPath2, $srcFH, $tmpFH_n) = @_;
         $dirPath2 =~ s/[\\\/]+$//;
@@ -1091,8 +1138,8 @@ sub getSnapSysDiff
             };
             $MY_CURSOR = $dbh1;
             $cbPtr = sub {
-                state $ub = scalar(@_)-(CONST::DIFF_WITH_TIMESTAMPS ? 2 : 1);
-				state $timestampPropIdx = CONST::DIFF_WITH_TIMESTAMPS ? ($ub+1) : undef;
+                state $ub = scalar(@_)-(OPT_DIFF_WITH_TIMESTAMPS ? 2 : 1);
+				state $timestampPropIdx = OPT_DIFF_WITH_TIMESTAMPS ? ($ub+1) : undef;
                 state $notDone = 1;
                 state $l2 = undef;
                 state $stack = [];
@@ -1112,7 +1159,7 @@ sub getSnapSysDiff
                     },sub{
                         # 2 => target
                         return ($_[0] == TYPE_SYMLINK) ? abs_path($absPath) : undef;
-                    },(CONST::DIFF_WITH_TIMESTAMPS ? (sub{
+                    },(OPT_DIFF_WITH_TIMESTAMPS ? (sub{
                         # 3 => last_modified
                         return ($_[0] == TYPE_FILE) ? getMTime($absPath) : undef;
                     }) : ())];
@@ -1264,7 +1311,7 @@ sub getSnapSysDiff
                                         # Going deep, so do not compare meta info by dir
                                         last;
                                     }
-									if (CONST::DIFF_WITH_TIMESTAMPS && ($_[$timestampPropIdx] == $getFileProperty->($timestampPropIdx)))
+									if (OPT_DIFF_WITH_TIMESTAMPS && ($_[$timestampPropIdx] == $getFileProperty->($timestampPropIdx)))
 									{
 										last;
 									}
